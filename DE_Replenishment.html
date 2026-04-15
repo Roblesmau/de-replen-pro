@@ -676,6 +676,15 @@
 </div>
 
 <script>
+// Load config.json at startup
+let CONFIG={supabase:{url:'',anonKey:''},shopify:{proxyUrl:''}};
+(async()=>{
+  try{
+    const r=await fetch('./config.json');
+    if(r.ok) CONFIG=await r.json();
+  }catch(e){console.warn('config.json not found, using defaults');}
+})();
+
 const STORES_DEF=[
   // Shopify location IDs mapped to real NAV location codes
   {id:'67928096942',name:'R001 - POV Sawgrass',          short:'POV Sawgrass',      city:'Sunrise',       navLoc:'JOL CORAL GABLES'},
@@ -2970,8 +2979,8 @@ function loadCredentials(){
   const token=localStorage.getItem('de_token');
   const domain=localStorage.getItem('de_domain');
   const proxy=localStorage.getItem('de_proxy');
-  const sbUrl=localStorage.getItem('de_sb_url')||'https://zoqihptkwurpqenpjgfw.supabase.co';
-  const sbKey=localStorage.getItem('de_sb_key')||'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvcWlocHRrd3VycHFlbnBqZ2Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MjA0ODgsImV4cCI6MjA5MDM5NjQ4OH0.Zts7u41SIN0HQ5G7sXb-QIhbTGQSctE--lHKa4Fui-Q';
+  const sbUrl=localStorage.getItem('de_sb_url')||CONFIG.supabase.url||'';
+  const sbKey=localStorage.getItem('de_sb_key')||CONFIG.supabase.anonKey||'';
   if(token){const el=document.getElementById('liveToken');if(el) el.value=token;}
   if(domain){const el=document.getElementById('liveDomain');if(el) el.value=domain;}
   if(proxy){const el=document.getElementById('proxyUrl');if(el) el.value=proxy;}

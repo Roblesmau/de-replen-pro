@@ -425,11 +425,11 @@ S = {
 ---
 
 ## File Management
-- Work in `/home/claude/DE_Replenishment.html`
-- Copy to `/mnt/user-data/outputs/` after checklist passes
-- Use Python string replacement with exact Unicode matching for multi-line edits
+- Working file: `DE_Replenishment.html` in this project directory
+- Use the Edit tool for targeted replacements; Read the file before editing
 - Always read the actual code before diagnosing — never speculate
-- For large replacements: write to temp file, verify match count = 1, then apply
+- For large replacements: verify the old_string is unique before applying
+- Credentials stored in `config.json` (loaded on startup); never hardcode keys in source
 
 ---
 
