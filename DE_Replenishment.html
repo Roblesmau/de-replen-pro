@@ -1381,8 +1381,8 @@ function renderRecos(prefix=''){
       <div class="reco-body" id="body-${sid}">
         <table><thead><tr><th>SKU (NAV No.)</th><th>Brand · Type</th><th>90d vel</th><th>Store qty</th><th>WH qty</th><th>QTY</th><th>Signals</th></tr></thead>
         <tbody>${st.items.map(r=>`<tr>
-          <td style="font-family:monospace;font-size:11px">${r.sku}</td>
-          <td>${r.brand} · ${r.type}</td><td>${r.velocity90}</td><td>${r.storeQty}</td><td>${r.whQty}</td>
+          <td style="font-family:monospace;font-size:11px">${hesc(r.sku)}</td>
+          <td>${hesc(r.brand)} · ${hesc(r.type)}</td><td>${r.velocity90}</td><td>${r.storeQty}</td><td>${r.whQty}</td>
           <td><span class="pill ${r.transferQty>1?'p-err':'p-ok'}" style="font-weight:700">${r.transferQty}</span></td>
           <td>${r.signals.map(s=>s==='hot'?'<span class="pill p-ok">🔥 Hot</span>':s==='low'?'<span class="pill p-warn">⚠ Low stock</span>':'<span class="pill p-info">📈 Seasonal</span>').join(' ')}</td>
         </tr>`).join('')}</tbody></table>
@@ -1411,16 +1411,16 @@ function renderNAVPreview(prefix=''){
         <thead><tr style="background:#1F4E79;color:#fff">${['ITEM','No. (SKU)','Action Message','Accept','Description','Location Code','Original QTY','QTY','Brand','Type','Signal'].map((h,i)=>`<th style="padding:6px 9px;font-weight:500;border:1px solid #164069;${i>=8?'background:#2E6096':''}">${h}</th>`).join('')}</tr></thead>
         <tbody>${r.map((x,i)=>`<tr style="background:${i%2?'#F0F6FC':'#fff'}">
           <td style="padding:5px 9px;border:1px solid #BDD7EE">Item</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;font-family:monospace">${x.sku}</td>
+          <td style="padding:5px 9px;border:1px solid #BDD7EE;font-family:monospace">${hesc(x.sku)}</td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center">New</td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center;color:#3B6D11;font-weight:700">Yes</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.desc}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE">${st?.navLoc||sid}</td>
+          <td style="padding:5px 9px;border:1px solid #BDD7EE;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hesc(x.desc)}</td>
+          <td style="padding:5px 9px;border:1px solid #BDD7EE">${hesc(st?.navLoc||sid)}</td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center"></td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center;font-weight:700;color:${x.transferQty>1?'#A32D2D':'inherit'}">${x.transferQty}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB">${x.brand}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB">${x.type}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB;font-size:10px">${x.signals.join('+')}</td>
+          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB">${hesc(x.brand)}</td>
+          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB">${hesc(x.type)}</td>
+          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB;font-size:10px">${hesc(x.signals.join('+'))}</td>
         </tr>`).join('')}</tbody>
       </table></div>
     </div>
@@ -2142,20 +2142,10 @@ async function testConn(){
     clog('✗ '+e.message);setConnStatus('✗ '+e.message,'s-err');setStep(1,'err');
   }
 }
-async function fetchAllPages(endpoint,key,maxPages=10){
-  let all=[],url=endpoint+(endpoint.includes('?')?'&':'?')+'limit=250';
-  for(let page=0;page<maxPages;page++){
-    const data=await shopifyFetch(url);const items=data[key]||[];
-    all=[...all,...items];clog('    page '+(page+1)+': '+items.length+' (total '+all.length+')');
-    if(items.length<250) break;const lastId=items[items.length-1]?.id;if(!lastId) break;
-    const base=endpoint.split('&since_id')[0].split('?since_id')[0];
-    url=base+(base.includes('?')?'&':'?')+'limit=250&since_id='+lastId;
-  }
-  return all;
-}
-
 // Global SKU normalizer — strip leading apostrophes and whitespace
 function normSku(s){return String(s||'').replace(/^'+/,'').trim();}
+// HTML escaper — prevents Shopify data with special chars from breaking innerHTML
+function hesc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
 function setProgress(pct){
   const bar=document.getElementById('loadProgress');
@@ -2677,7 +2667,7 @@ function renderInspector(){
           if(c==='trend_pct'&&v===null) d='<span style="color:var(--hint)">—</span>';
           if(c==='cost') d='$'+parseFloat(v||0).toFixed(2);
           if(c==='description') s+='max-width:180px;overflow:hidden;text-overflow:ellipsis;';
-          return `<td style="${s}" title="${String(v||'')}">${d}</td>`;
+          return `<td style="${s}" title="${hesc(v)}">${d}</td>`;
         }).join('')}
       </tr>`).join('')}</tbody></table>`;
     return;
@@ -2696,7 +2686,7 @@ function renderInspector(){
     const shown=wh.slice(0,nRows);
     const cols=['sku','whQty','brand','type','name','matched'];
     const labels={sku:'Variant SKU',whQty:'WH Qty',brand:'Brand',type:'Type',name:'Description',matched:'Matched'};
-    document.getElementById('inspectorTableWrap').innerHTML=`<table><thead><tr>${cols.map(c=>`<th>${labels[c]||c}</th>`).join('')}</tr></thead><tbody>${shown.map((r,i)=>`<tr style="${i%2?'background:var(--bg)':''}"><td style="font-family:monospace;font-size:11px">${r.sku}</td><td style="text-align:center;font-weight:600;color:var(--blue)">${r.whQty}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${r.brand||'—'}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${r.type||'—'}</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name||'—'}</td><td style="text-align:center">${r.matched?'<span class="pill p-ok">✓</span>':'<span class="pill p-warn">⚠</span>'}</td></tr>`).join('')}</tbody></table>`;
+    document.getElementById('inspectorTableWrap').innerHTML=`<table><thead><tr>${cols.map(c=>`<th>${hesc(labels[c]||c)}</th>`).join('')}</tr></thead><tbody>${shown.map((r,i)=>`<tr style="${i%2?'background:var(--bg)':''}"><td style="font-family:monospace;font-size:11px">${hesc(r.sku)}</td><td style="text-align:center;font-weight:600;color:var(--blue)">${r.whQty}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${hesc(r.brand)||'—'}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${hesc(r.type)||'—'}</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hesc(r.name)||'—'}</td><td style="text-align:center">${r.matched?'<span class="pill p-ok">✓</span>':'<span class="pill p-warn">⚠</span>'}</td></tr>`).join('')}</tbody></table>`;
     return;
   }
   // Enrich inventory rows with SKU and store name for readability
@@ -2987,14 +2977,14 @@ function loadCredentials(){
   if(sbUrl){const el=document.getElementById('sbUrl');if(el) el.value=sbUrl;}
   if(sbKey){const el=document.getElementById('sbKey');if(el) el.value=sbKey;}
   if(token){
-    document.getElementById('connLog').textContent='✓ Credentials loaded. Click ⚡ Load from cache or 📥 Full Shopify load.';
+    document.getElementById('connLog').textContent='Credentials loaded from previous session. Click Test Connection to verify before loading data.';
+    // Unlock 2A buttons — but do NOT mark Step 1 green; user must test connection explicitly
     ['btnLoad','btnCache'].forEach(id=>{
       const b=document.getElementById(id);
       if(b){b.disabled=false;b.style.opacity='1';b.style.cursor='pointer';}
     });
     const bwh=document.getElementById('btnWH');
     if(bwh){bwh.style.opacity='1';bwh.style.pointerEvents='auto';bwh.style.cursor='pointer';}
-    setStep(1,'ok');
   }
 }
 loadCredentials();
