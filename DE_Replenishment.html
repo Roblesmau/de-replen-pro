@@ -302,9 +302,9 @@
 <!-- DASHBOARD -->
 <div class="panel" id="panel-dashboard">
   <div class="filter-row">
-    <select id="dfStore" onchange="updateDash()"><option value="">All stores</option></select>
-    <select id="dfBrand" onchange="updateDash()"><option value="">All brands</option></select>
-    <select id="dfType"  onchange="updateDash()"><option value="">All types</option></select>
+    <select id="dfStore" onchange="updateDash();syncDashToInv()"><option value="">All stores</option></select>
+    <select id="dfBrand" onchange="updateDash();syncDashToInv()"><option value="">All brands</option></select>
+    <select id="dfType"  onchange="updateDash();syncDashToInv()"><option value="">All types</option></select>
     <div style="margin-left:auto">
       <div class="toggle-group">
         <button class="topt active" id="tUnits"  onclick="setVM('units')">Units</button>
@@ -366,6 +366,12 @@
 
 <!-- INVENTORY -->
 <div class="panel" id="panel-inventory">
+  <div class="filter-row" style="margin-bottom:10px">
+    <select id="invStoreFilter" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="width:auto;min-width:160px;height:72px"></select>
+    <select id="invBrandFilter" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="width:auto;min-width:140px;height:72px"></select>
+    <select id="invTypeFilter" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="width:auto;min-width:130px;height:72px"></select>
+    <span id="invCount" style="font-size:11px;color:var(--muted)"></span>
+  </div>
   <div class="card">
     <div class="card-title">Store totals — on hand by store</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Total units on hand per store across all brands and types. Use this to cross-check against your POS reports.</div>
@@ -375,11 +381,13 @@
           <th>Store</th>
           <th style="text-align:right">SKUs tracked</th>
           <th style="text-align:right">Units on hand</th>
-          <th style="text-align:right">Units available (>0)</th>
-          <th style="text-align:right">Zero stock SKUs</th>
+          <th style="text-align:right">Available (>0)</th>
           <th style="text-align:right">Capacity</th>
           <th style="text-align:right">Fill %</th>
           <th style="text-align:right">90d Sales</th>
+          <th style="text-align:right">PY 120d</th>
+          <th style="text-align:right">Trend %</th>
+          <th style="text-align:right">Forecast 90d</th>
           <th style="text-align:right">Days of Stock</th>
         </tr></thead>
         <tbody id="invTotalsBody"></tbody>
@@ -390,14 +398,8 @@
 
   <div class="card">
     <div class="card-title">SKU detail — selected stores</div>
-    <div id="invUnknownWarn"></div>
-    <div class="filter-row" style="margin-bottom:10px">
-      <select id="invStoreFilter" onchange="renderInv()" style="width:auto;min-width:160px"><option value="">All stores</option></select>
-      <select id="invBrandFilter" onchange="renderInv()" style="width:auto;min-width:140px"><option value="">All brands</option></select>
-      <span id="invCount" style="font-size:11px;color:var(--muted)"></span>
-    </div>
     <div style="overflow-x:auto">
-      <table><thead><tr><th>Store</th><th>SKU</th><th>Brand</th><th>Type</th><th>Store Qty</th><th>Capacity</th><th>Fill %</th></tr></thead>
+      <table id="storeInvTable"><thead><tr><th>Store</th><th>SKU</th><th>Brand</th><th>Type</th><th>Store Qty</th><th>Capacity</th><th>Fill %</th></tr></thead>
       <tbody id="storeInvBody"></tbody></table>
     </div>
   </div>
@@ -525,6 +527,7 @@
     <div id="whStatus" style="margin-top:8px"></div>
   </div>
 
+  <div id="liveConnectWarn" style="display:none;margin-bottom:10px"></div>
   <div class="card" id="rawInspector" style="display:none">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>Raw data inspector</span>
@@ -537,6 +540,7 @@
           <option value="orders">Orders 90d</option>
           <option value="ordersPY">Orders Prior Year</option>
           <option value="wh">WH Bin Contents</option>
+          <option value="unknown_skus">⚠ Warnings — Unknown SKUs</option>
         </select>
         <select id="inspectorRows" onchange="renderInspector()" style="width:auto;font-size:11px">
           <option value="5">5 rows</option>
@@ -1090,104 +1094,133 @@ function populateInvFilters(){
   const sf=document.getElementById('invStoreFilter');
   const bf=document.getElementById('invBrandFilter');
   if(!sf||!bf) return;
-  const curS=sf.value, curB=bf.value;
-  sf.innerHTML='<option value="">All stores</option>'+STORES.map(s=>`<option value="${s.id}"${curS===s.id?' selected':''}>${s.id} — ${s.short}</option>`).join('');
+  const savedS=JSON.parse(localStorage.getItem('de_inv_store_filter')||'null');
+  sf.innerHTML='<option value="__all__">✓ Select All</option>'+STORES.map(s=>`<option value="${s.id}"${!savedS||savedS.includes(s.id)?' selected':''}>${s.id} — ${s.short}</option>`).join('');
   // Exclude Unknown from brand filter — these are products with no vendor set in Shopify
   const brands=[...new Set(DATA.map(d=>d.brand))].filter(b=>b&&b!=='Unknown').sort();
-  bf.innerHTML='<option value="">All brands</option>'+brands.map(b=>`<option${curB===b?' selected':''}>${b}</option>`).join('');
+  const savedB=JSON.parse(localStorage.getItem('de_inv_brand_filter')||'null');
+  bf.innerHTML='<option value="__all__">✓ Select All</option>'+brands.map(b=>`<option value="${hesc(b)}"${!savedB||savedB.includes(b)?' selected':''}>${hesc(b)}</option>`).join('');
+  const tf=document.getElementById('invTypeFilter');
+  if(tf){
+    const types=[...new Set(DATA.map(d=>d.type))].filter(t=>t&&t!=='Unknown').sort();
+    const saved=JSON.parse(localStorage.getItem('de_inv_type_filter')||'null');
+    tf.innerHTML='<option value="__all__">✓ Select All</option>'+types.map(t=>`<option value="${hesc(t)}"${!saved||saved.includes(t)?' selected':''}>${hesc(t)}</option>`).join('');
+  }
   // Show warning if Unknown SKUs exist
   const unknownCount=DATA.filter(d=>d.brand==='Unknown'||d.type==='Unknown').length;
-  const warnEl=document.getElementById('invUnknownWarn');
+  const warnEl=document.getElementById('liveConnectWarn');
   if(warnEl){
     if(unknownCount>0){
       const uniqueUnknownSkus=[...new Set(DATA.filter(d=>d.brand==='Unknown'||d.type==='Unknown').map(d=>d.sku))].length;
       warnEl.innerHTML=`<div class="sb s-warn" style="margin-bottom:10px">${uniqueUnknownSkus} SKUs have no brand/type assigned in Shopify (${unknownCount} store records). These are excluded from the brand filter. Fix by setting Vendor and Product Type on the product in Shopify.</div>`;
+      warnEl.style.display='block';
     } else {
       warnEl.innerHTML='';
+      warnEl.style.display='none';
     }
   }
 }
 
 function renderInv(){
   const sel=S.sel.size?[...S.sel]:STORES.map(s=>s.id);
-  const invStoreFilter=document.getElementById('invStoreFilter')?.value||'';
-  const invBrandFilter=document.getElementById('invBrandFilter')?.value||'';
+  const invStoreFilter=getFilterValues('invStoreFilter');
+  const invBrandFilter=getFilterValues('invBrandFilter');
+  const invTypeFilter=getFilterValues('invTypeFilter');
+  const hasPY=(S.raw.ordersPY||[]).length>0;
+
+  // Helper: cap for a brand+type+store counted ONCE (not per SKU row)
+  function storeCapOnce(stData,storeId){
+    const seen=new Set();let cap=0;
+    stData.forEach(d=>{const k=d.brand+'|'+d.type;if(!seen.has(k)){cap+=(S.CAP[storeId]?.[d.brand]?.[d.type]||0);seen.add(k);}});
+    return cap;
+  }
+  // Helper: trend % normalized to same period (90d vs PY 120d)
+  function trendPct(vel90,py120){if(!py120||!hasPY) return null;const pyN=py120*0.75;return pyN>0?Math.round((vel90/pyN-1)*100):null;}
+  // Helper: forecast next 90d using trend
+  function forecast90(vel90,trend){if(trend===null) return null;return Math.round(vel90*(1+trend/100));}
+
+  // ── Apply filters ──────────────────────────────────────────────
+  let allSelRows=DATA.filter(d=>sel.includes(d.storeId));
+  if(invStoreFilter.length) allSelRows=allSelRows.filter(d=>invStoreFilter.includes(d.storeId));
+  if(invBrandFilter.length) allSelRows=allSelRows.filter(d=>invBrandFilter.includes(d.brand));
+  if(invTypeFilter.length) allSelRows=allSelRows.filter(d=>invTypeFilter.includes(d.type));
 
   // ── Store totals table ─────────────────────────────────────────
-  const allSelRows=DATA.filter(d=>sel.includes(d.storeId));
   const totalsBody=document.getElementById('invTotalsBody');
   const totalsFoot=document.getElementById('invTotalsFoot');
   if(totalsBody){
-    let grandSkus=0,grandUnits=0,grandAvail=0,grandZero=0,grandCap=0,grandVel=0;
-    const storeRows=STORES.filter(st=>sel.includes(st.id)).map(st=>{
+    let grandSkus=0,grandUnits=0,grandAvail=0,grandCap=0,grandVel=0,grandPY=0;
+    const storeRows=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id))).map(st=>{
       const stData=allSelRows.filter(d=>d.storeId===st.id);
+      if(!stData.length) return'';
       const skus=stData.length;
       const units=stData.reduce((a,d)=>a+d.storeQty,0);
       const avail=stData.filter(d=>d.storeQty>0).length;
-      const zero=stData.filter(d=>d.storeQty<=0).length;
-      const cap=stData.reduce((a,d)=>a+d.cap,0);
+      const cap=storeCapOnce(stData,st.id);
       const vel=stData.reduce((a,d)=>a+d.velocity90,0);
+      const py=hasPY?stData.reduce((a,d)=>a+(d.priorYear90||0),0):0;
       const pct=cap>0?Math.round(units/cap*100):0;
-      const dailyVel=vel/90;
-      const dos=dailyVel>0?Math.round(units/dailyVel):999;
       const col=pct<30?'var(--red)':pct<60?'var(--amber)':pct<90?'var(--green)':'var(--blue)';
-      grandSkus+=skus;grandUnits+=units;grandAvail+=avail;grandZero+=zero;grandCap+=cap;grandVel+=vel;
-      return `<tr>
+      const tr=trendPct(vel,py);
+      const fc=forecast90(vel,tr);
+      const dailyVel=vel/90;const dos=dailyVel>0?Math.round(units/dailyVel):999;
+      grandSkus+=skus;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;
+      return`<tr>
         <td><strong>${st.short}</strong><br><span style="font-size:10px;color:var(--muted)">${st.city||''}</span></td>
         <td style="text-align:right;font-family:monospace">${skus.toLocaleString()}</td>
         <td style="text-align:right;font-size:14px;font-weight:600">${units.toLocaleString()}</td>
         <td style="text-align:right;color:var(--green)">${avail.toLocaleString()}</td>
-        <td style="text-align:right;color:${zero>0?'var(--red)':'var(--muted)'}">${zero.toLocaleString()}</td>
         <td style="text-align:right;color:var(--muted)">${cap.toLocaleString()}</td>
-        <td style="text-align:right">
-          <span style="font-weight:600;color:${col}">${pct}%</span>
-          <div style="height:4px;border-radius:2px;background:var(--border);margin-top:3px">
-            <div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div>
-          </div>
-        </td>
+        <td style="text-align:right"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:4px;border-radius:2px;background:var(--border);margin-top:3px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td>
         <td style="text-align:right;color:var(--blue)">${vel.toLocaleString()}</td>
+        <td style="text-align:right;color:var(--muted)">${hasPY?py.toLocaleString():'—'}</td>
+        <td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td>
+        <td style="text-align:right;color:var(--blue)">${fc===null?'—':fc.toLocaleString()}</td>
         <td style="text-align:right;color:${dos<=30?'var(--red)':dos<=60?'var(--amber)':'var(--muted)'}">${dos===999?'—':dos+'d'}</td>
       </tr>`;
     });
     totalsBody.innerHTML=storeRows.join('');
-    // Grand total row
     const grandPct=grandCap>0?Math.round(grandUnits/grandCap*100):0;
+    const grandTr=trendPct(grandVel,grandPY);
+    const grandFc=forecast90(grandVel,grandTr);
     const grandDos=grandVel>0?Math.round(grandUnits/(grandVel/90)):999;
     totalsFoot.innerHTML=`<tr style="background:var(--bg)">
-      <td>TOTAL (${sel.length} stores)</td>
+      <td><strong>TOTAL</strong></td>
       <td style="text-align:right;font-family:monospace">${grandSkus.toLocaleString()}</td>
       <td style="text-align:right;font-size:14px;font-weight:700">${grandUnits.toLocaleString()}</td>
       <td style="text-align:right">${grandAvail.toLocaleString()}</td>
-      <td style="text-align:right">${grandZero.toLocaleString()}</td>
       <td style="text-align:right">${grandCap.toLocaleString()}</td>
       <td style="text-align:right;font-weight:700">${grandPct}%</td>
       <td style="text-align:right">${grandVel.toLocaleString()}</td>
+      <td style="text-align:right">${hasPY?grandPY.toLocaleString():'—'}</td>
+      <td style="text-align:right;font-weight:600;color:${grandTr===null?'var(--muted)':grandTr>0?'var(--green)':grandTr<0?'var(--red)':'var(--muted)'}">${grandTr===null?'—':(grandTr>0?'▲ +':grandTr<0?'▼ ':'')+grandTr+'%'}</td>
+      <td style="text-align:right">${grandFc===null?'—':grandFc.toLocaleString()}</td>
       <td style="text-align:right">${grandDos===999?'—':grandDos+'d'}</td>
     </tr>`;
   }
 
-  // ── Brand × Type grouped summary (Store → Brand → Type) ────────────────────
-  let rows=allSelRows;
-  if(invStoreFilter) rows=rows.filter(d=>d.storeId===invStoreFilter);
-  if(invBrandFilter) rows=rows.filter(d=>d.brand===invBrandFilter);
-
-  const selStores=STORES.filter(st=>sel.includes(st.id));
+  // ── Brand × Type grouped summary ────────────────────────────────
   const agg={};
-  rows.forEach(d=>{
+  const capSeen=new Set();
+  allSelRows.forEach(d=>{
     const k=d.brand+'|||'+d.type;
-    if(!agg[k]) agg[k]={brand:d.brand,type:d.type,onHand:0,vel90:0,cap:0,byStore:{}};
+    if(!agg[k]) agg[k]={brand:d.brand,type:d.type,onHand:0,vel90:0,py120:0,cap:0,byStore:{}};
     agg[k].onHand+=d.storeQty;
     agg[k].vel90+=d.velocity90;
-    agg[k].cap+=d.cap;
+    agg[k].py120+=(d.priorYear90||0);
+    // Cap counted once per brand+type+store
+    const ck=d.storeId+'|'+d.brand+'|'+d.type;
+    if(!capSeen.has(ck)){agg[k].cap+=(S.CAP[d.storeId]?.[d.brand]?.[d.type]||0);capSeen.add(ck);}
     agg[k].byStore[d.storeId]=(agg[k].byStore[d.storeId]||0)+d.storeQty;
   });
   const aggRows=Object.values(agg).sort((a,b)=>a.brand.localeCompare(b.brand)||a.type.localeCompare(b.type));
   const countEl=document.getElementById('invCount');
   if(countEl) countEl.textContent=aggRows.length.toLocaleString()+' brand×type combos';
 
-  const selStoresCols=STORES.filter(st=>sel.includes(st.id));
+  const selStoresCols=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id)));
   const storeHeaders=selStoresCols.map(st=>`<th style="text-align:center;white-space:nowrap;font-size:10px">${st.short}</th>`).join('');
-  const thead=`<tr><th>Brand</th><th>Type</th><th style="text-align:right">On Hand</th><th style="text-align:right">90d Sales</th><th style="text-align:right">Capacity</th><th style="text-align:center">Fill %</th>${storeHeaders}</tr>`;
+  const pyHeaders=hasPY?`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">Forecast 90d</th>`:'';
+  const thead=`<tr><th>Brand</th><th>Type</th><th style="text-align:right">On Hand</th><th style="text-align:right">90d Sales</th>${pyHeaders}<th style="text-align:right">Capacity</th><th style="text-align:center">Fill %</th>${storeHeaders}</tr>`;
   const tblHead=document.querySelector('#storeInvTable thead');
   if(tblHead) tblHead.innerHTML=thead;
 
@@ -1195,16 +1228,76 @@ function renderInv(){
   document.getElementById('storeInvBody').innerHTML=aggRows.map(r=>{
     const pct=r.cap>0?Math.round(r.onHand/r.cap*100):0;
     const col=pct<30?'var(--red)':pct<60?'var(--amber)':pct<90?'var(--green)':'var(--blue)';
+    const tr=trendPct(r.vel90,r.py120);
+    const fc=forecast90(r.vel90,tr);
     const brandCell=r.brand!==lastBrand
-      ?`<td style="font-weight:600;font-size:12px">${r.brand}</td>`
+      ?`<td style="font-weight:600;font-size:12px">${hesc(r.brand)}</td>`
       :`<td style="color:var(--hint);font-size:11px;padding-left:14px">└─</td>`;
     lastBrand=r.brand;
-    const storeCells=selStoresCols.map(st=>{
-      const v=r.byStore[st.id]||0;
-      return`<td style="text-align:center;font-family:monospace;font-size:11px;color:${v>0?'var(--green)':'var(--hint)'}">${v||'—'}</td>`;
-    }).join('');
-    return`<tr>${brandCell}<td style="font-size:11px;color:var(--muted)">${r.type}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td>${storeCells}</tr>`;
+    const storeCells=selStoresCols.map(st=>{const v=r.byStore[st.id]||0;return`<td style="text-align:center;font-family:monospace;font-size:11px;color:${v>0?'var(--green)':v<0?'var(--red)':'var(--hint)'}">${v||'—'}</td>`;}).join('');
+    const pyCells=hasPY?`<td style="text-align:right;color:var(--muted)">${r.py120.toLocaleString()}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fc===null?'—':fc.toLocaleString()}</td>`:'';
+    return`<tr>${brandCell}<td style="font-size:11px;color:var(--muted)">${hesc(r.type)}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td>${pyCells}<td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td>${storeCells}</tr>`;
   }).join('');
+}
+function getFilterValues(id){
+  const el=document.getElementById(id);
+  if(!el) return[];
+  return[...el.selectedOptions].map(o=>o.value).filter(v=>v!=='__all__');
+}
+let _filterSyncing=false;
+function syncInvToDash(){
+  if(_filterSyncing) return;_filterSyncing=true;
+  const brands=getFilterValues('invBrandFilter');
+  const types=getFilterValues('invTypeFilter');
+  const stores=getFilterValues('invStoreFilter');
+  const dfb=document.getElementById('dfBrand');if(dfb) dfb.value=brands.length===1?brands[0]:'';
+  const dft=document.getElementById('dfType');if(dft) dft.value=types.length===1?types[0]:'';
+  const dfs=document.getElementById('dfStore');
+  if(dfs){const st=stores.length===1?STORES.find(s=>s.id===stores[0]):null;dfs.value=st?st.id+' — '+st.short:'';}
+  if(typeof updateDash==='function') updateDash();
+  _filterSyncing=false;
+}
+function syncDashToInv(){
+  if(_filterSyncing) return;_filterSyncing=true;
+  const b=document.getElementById('dfBrand')?.value||'';
+  const t=document.getElementById('dfType')?.value||'';
+  const s=(document.getElementById('dfStore')?.value||'').split(' ')[0];
+  const bfEl=document.getElementById('invBrandFilter');
+  if(bfEl){[...bfEl.options].filter(o=>o.value!=='__all__').forEach(o=>o.selected=!b||o.value===b);saveInvBrandFilter();}
+  const tfEl=document.getElementById('invTypeFilter');
+  if(tfEl){[...tfEl.options].filter(o=>o.value!=='__all__').forEach(o=>o.selected=!t||o.value===t);saveInvTypeFilter();}
+  const sfEl=document.getElementById('invStoreFilter');
+  if(sfEl){[...sfEl.options].filter(o=>o.value!=='__all__').forEach(o=>o.selected=!s||o.value===s);saveInvStoreFilter();}
+  if(DATA.length) renderInv();
+  _filterSyncing=false;
+}
+function handleInvFilter(id,saveFn){
+  const el=document.getElementById(id);if(!el) return;
+  const hasAll=[...el.selectedOptions].some(o=>o.value==='__all__');
+  if(hasAll){
+    const opts=[...el.options].filter(o=>o.value!=='__all__');
+    const allSel=opts.every(o=>o.selected);
+    opts.forEach(o=>o.selected=!allSel);
+    [...el.options].filter(o=>o.value==='__all__').forEach(o=>o.selected=false);
+  }
+  if(saveFn) saveFn();
+  renderInv();
+  syncInvToDash();
+}
+function saveInvStoreFilter(){
+  const sf=document.getElementById('invStoreFilter');
+  if(!sf) return;
+  localStorage.setItem('de_inv_store_filter',JSON.stringify(getFilterValues('invStoreFilter')));
+}
+function saveInvBrandFilter(){
+  const bf=document.getElementById('invBrandFilter');
+  if(!bf) return;
+  localStorage.setItem('de_inv_brand_filter',JSON.stringify([...bf.selectedOptions].map(o=>o.value).filter(v=>v!=='__all__')));
+}
+function saveInvTypeFilter(){
+  const tf=document.getElementById('invTypeFilter');
+  if(!tf) return;
+  localStorage.setItem('de_inv_type_filter',JSON.stringify([...tf.selectedOptions].map(o=>o.value).filter(v=>v!=='__all__')));
 }
 function parseCSVLine(line){
   const fields=[];let cur='',inQ=false;
@@ -1672,9 +1765,10 @@ function onCapChange(input){
   const{store,brand,type}=input.dataset;const v=Math.max(0,parseInt(input.value)||0);S.CAP[store][brand][type]=v;
   const orig=S.ORIG[store]?.[brand]?.[type];input.className=v!==orig?'cap-input changed':v===0?'cap-input zero':'cap-input';
   S.capChanges++;document.getElementById('capBadge').style.display='inline-block';document.getElementById('capBadge').textContent=`${S.capChanges} change${S.capChanges>1?'s':''}`;
+  applyCapToData();
 }
 function addBrandToStore(brand,storeId){if(!S.CAP[storeId][brand]) S.CAP[storeId][brand]={};TYPES.forEach(t=>{if(S.CAP[storeId][brand][t]===undefined) S.CAP[storeId][brand][t]=0;});S.STORE_BRANDS[storeId].add(brand);renderCap();}
-function resetCap(){if(!confirm('Reset all changes?')) return;STORES.forEach(st=>BRANDS.forEach(b=>TYPES.forEach(t=>{if(S.ORIG[st.id]?.[b]?.[t]!==undefined) S.CAP[st.id][b][t]=S.ORIG[st.id][b][t];})));S.newBrands.forEach(b=>{BRANDS=BRANDS.filter(x=>x!==b);STORES.forEach(st=>{delete S.CAP[st.id][b];S.STORE_BRANDS[st.id].delete(b);});});S.newBrands.clear();S.capChanges=0;document.getElementById('capBadge').style.display='none';renderCap();populateCapBrandFilter();}
+function resetCap(){if(!confirm('Reset all changes?')) return;STORES.forEach(st=>BRANDS.forEach(b=>TYPES.forEach(t=>{if(S.ORIG[st.id]?.[b]?.[t]!==undefined) S.CAP[st.id][b][t]=S.ORIG[st.id][b][t];})));S.newBrands.forEach(b=>{BRANDS=BRANDS.filter(x=>x!==b);STORES.forEach(st=>{delete S.CAP[st.id][b];S.STORE_BRANDS[st.id].delete(b);});});S.newBrands.clear();S.capChanges=0;document.getElementById('capBadge').style.display='none';applyCapToData();renderCap();populateCapBrandFilter();if(DATA.length) renderInv();}
 function exportCapXLSX(){
   const wb=XLSX.utils.book_new();const rows=[['Store Code','Store Name','Brand','Type','Max Capacity']];
   STORES.forEach(st=>BRANDS.forEach(b=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;TYPES.forEach(t=>{rows.push([st.id,st.name,b,t,S.CAP[st.id]?.[b]?.[t]??0]);});}));
@@ -1717,6 +1811,9 @@ function loadCapFromLocalStorage(){
     return n>0;
   }catch(e){clog('Capacity localStorage load error: '+e.message);return false;}
 }
+function applyCapToData(){
+  DATA.forEach(d=>{d.cap=(S.CAP[d.storeId]&&S.CAP[d.storeId][d.brand]&&S.CAP[d.storeId][d.brand][d.type])||0;});
+}
 function importCapFromFile(input){
   const file=input.files[0];if(!file) return;
   const reader=new FileReader();
@@ -1737,7 +1834,9 @@ function importCapFromFile(input){
         n++;
       });
       saveCapToLocalStorage();
+      applyCapToData();
       renderCap();
+      if(DATA.length) renderInv();
       const s=document.getElementById('capSummary');
       if(s) s.innerHTML+=`<span style="color:var(--green);margin-left:8px">✓ Imported ${n} rows · saved to localStorage</span>`;
       input.value='';
@@ -1747,7 +1846,7 @@ function importCapFromFile(input){
 }
 function parseCapFile(input){
   const file=input.files[0];if(!file) return;const reader=new FileReader();
-  reader.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});const sn=wb.SheetNames.includes('Capacity Matrix')?'Capacity Matrix':wb.SheetNames[0];const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''});let n=0;rows.forEach(r=>{const sid=(r['Store Code']||''). trim(),b=(r['Brand']||''). trim(),t=(r['Type']||''). trim(),v=parseInt(r['Max Capacity']||0)||0;if(!sid||!b||!t) return;if(!S.CAP[sid]) S.CAP[sid]={};if(!S.CAP[sid][b]) S.CAP[sid][b]={};S.CAP[sid][b][t]=v;if(S.ORIG[sid]) S.ORIG[sid][b]=S.ORIG[sid][b]||{};if(S.ORIG[sid]) S.ORIG[sid][b][t]=v;if(S.STORE_BRANDS[sid]) S.STORE_BRANDS[sid].add(b);n++;});document.getElementById('capUpStatus').innerHTML=`<div class="sb s-ok">✓ Loaded ${n} rows from ${file.name}</div>`;renderCap();}catch(e){document.getElementById('capUpStatus').innerHTML=`<div class="sb s-err">✗ ${e.message}</div>`;}};
+  reader.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});const sn=wb.SheetNames.includes('Capacity Matrix')?'Capacity Matrix':wb.SheetNames[0];const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''});let n=0;rows.forEach(r=>{const sid=(r['Store Code']||'').trim(),b=(r['Brand']||'').trim(),t=(r['Type']||'').trim(),v=parseInt(r['Max Capacity']||0)||0;if(!sid||!b||!t) return;if(!S.CAP[sid]) S.CAP[sid]={};if(!S.CAP[sid][b]) S.CAP[sid][b]={};S.CAP[sid][b][t]=v;if(S.ORIG[sid]){S.ORIG[sid][b]=S.ORIG[sid][b]||{};S.ORIG[sid][b][t]=v;}if(S.STORE_BRANDS[sid]) S.STORE_BRANDS[sid].add(b);n++;});saveCapToLocalStorage();applyCapToData();document.getElementById('capUpStatus').innerHTML=`<div class="sb s-ok">✓ Loaded ${n} rows from ${file.name} · saved</div>`;renderCap();if(DATA.length) renderInv();}catch(e){document.getElementById('capUpStatus').innerHTML=`<div class="sb s-err">✗ ${e.message}</div>`;}};
   reader.readAsArrayBuffer(file);
 }
 
@@ -2290,7 +2389,7 @@ function processLiveData(locs,invLevels,orders){
   const invByItemLoc={};  // "itemId|locId" → available
   invLevels.forEach(il=>{
     const k=String(il.inventory_item_id)+'|'+String(il.location_id);
-    invByItemLoc[k]=Math.max(0,parseInt(il.available)||0);
+    invByItemLoc[k]=parseInt(il.available)||0;
   });
 
   // ── SOURCE 4: ORDERS + LINE_ITEMS → velocity (net of refunds) ──────────────
@@ -2687,6 +2786,16 @@ function renderInspector(){
     const cols=['sku','whQty','brand','type','name','matched'];
     const labels={sku:'Variant SKU',whQty:'WH Qty',brand:'Brand',type:'Type',name:'Description',matched:'Matched'};
     document.getElementById('inspectorTableWrap').innerHTML=`<table><thead><tr>${cols.map(c=>`<th>${hesc(labels[c]||c)}</th>`).join('')}</tr></thead><tbody>${shown.map((r,i)=>`<tr style="${i%2?'background:var(--bg)':''}"><td style="font-family:monospace;font-size:11px">${hesc(r.sku)}</td><td style="text-align:center;font-weight:600;color:var(--blue)">${r.whQty}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${hesc(r.brand)||'—'}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${hesc(r.type)||'—'}</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hesc(r.name)||'—'}</td><td style="text-align:center">${r.matched?'<span class="pill p-ok">✓</span>':'<span class="pill p-warn">⚠</span>'}</td></tr>`).join('')}</tbody></table>`;
+    return;
+  }
+  if(table==='unknown_skus'){
+    const map=S.raw.itemMap||{};
+    const statsEl=document.getElementById('inspectorStats');
+    const unknownItems=Object.values(map).filter(v=>v.variantSku&&((!v.brand||v.brand==='Unknown')||(!v.type||v.type==='Unknown')));
+    if(statsEl) statsEl.innerHTML='<strong>'+unknownItems.length+'</strong> SKUs with missing Vendor or Product Type — download to get a full list for Shopify bulk fix';
+    if(!unknownItems.length){document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--green);font-size:12px">No unknown SKUs — all products have Vendor and Product Type set.</div>';return;}
+    const shown=unknownItems.slice(0,nRows);
+    document.getElementById('inspectorTableWrap').innerHTML=`<table><thead><tr><th>Variant SKU</th><th>Brand</th><th>Type</th><th>Issue</th></tr></thead><tbody>${shown.map((v,i)=>{const issue=(!v.brand||v.brand==='Unknown')&&(!v.type||v.type==='Unknown')?'Missing Vendor + Product Type':(!v.brand||v.brand==='Unknown')?'Missing Vendor':'Missing Product Type';return`<tr style="${i%2?'background:var(--bg)':''}"><td style="font-family:monospace;font-size:11px">${hesc(v.variantSku)}</td><td style="color:${(!v.brand||v.brand==='Unknown')?'var(--amber)':'inherit'}">${hesc(v.brand||'—')}</td><td style="color:${(!v.type||v.type==='Unknown')?'var(--amber)':'inherit'}">${hesc(v.type||'—')}</td><td style="color:var(--amber)">${hesc(issue)}</td></tr>`}).join('')}</tbody></table>`;
     return;
   }
   // Enrich inventory rows with SKU and store name for readability
