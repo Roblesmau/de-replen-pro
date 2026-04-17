@@ -1490,6 +1490,7 @@ function processWHRows(rows){
   }
   // Refresh all UI panels with updated whQty
   renderStoreGrid();
+  populateInvFilters();
   renderInv();
   populateDashFilters();
   if(typeof renderDash==='function') renderDash();
@@ -2565,7 +2566,7 @@ function processLiveData(locs,invLevels,orders){
   S.liveData={stores:[...STORES],data:[...DATA],brands:[...BRANDS],types:[...TYPES]};
   S.sel.clear();STORES.forEach(st=>S.sel.add(st.id));
   buildRecos();renderStoreGrid();populateSimSelects();
-  populateNavLocMap();populateDashFilters();populateCapBrandFilter();
+  populateNavLocMap();populateDashFilters();populateCapBrandFilter();populateInvFilters();
   clog('\n✓ '+DATA.length+' records across '+STORES.length+' stores ready');
   if(document.getElementById('schemaCard')&&document.getElementById('schemaCard').style.display!=='none') renderSchema();
 }
