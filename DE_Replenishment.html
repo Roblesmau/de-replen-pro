@@ -1182,7 +1182,7 @@ function renderInv(){
       grandSkus+=avail;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;
       return`<tr>
         <td><strong>${st.short}</strong><br><span style="font-size:10px;color:var(--muted)">${st.city||''}</span></td>
-        <td style="text-align:right;font-family:monospace">${skus.toLocaleString()}</td>
+        <td style="text-align:right;font-family:monospace">${avail.toLocaleString()}</td>
         <td style="text-align:right;font-size:14px;font-weight:600">${units.toLocaleString()}</td>
         <td style="text-align:right;color:var(--green)">${avail.toLocaleString()}</td>
         <td style="text-align:right;color:var(--muted)">${cap.toLocaleString()}</td>
