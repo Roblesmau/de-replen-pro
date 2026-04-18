@@ -1137,6 +1137,13 @@ function renderInv(){
   function fmt30(v){return v===null?'—':Math.round(v/3).toLocaleString();}
   function fmt90(v){return v===null?'—':v.toLocaleString();}
 
+  // ── WH columns visibility: only when all filters fully selected and bin contents loaded ──
+  const _sfEl=document.getElementById('invStoreFilter');
+  const _bfEl=document.getElementById('invBrandFilter');
+  const _tfEl=document.getElementById('invTypeFilter');
+  const _allSel=el=>!el||[...el.options].filter(o=>o.value!=='__all__').every(o=>o.selected);
+  const showWHCols=_allSel(_sfEl)&&_allSel(_bfEl)&&_allSel(_tfEl)&&(S.wh||[]).length>0;
+
   // ── Apply filters ──────────────────────────────────────────────
   let allSelRows=DATA.filter(d=>sel.includes(d.storeId));
   if(invStoreFilter.length) allSelRows=allSelRows.filter(d=>invStoreFilter.includes(d.storeId));
@@ -1145,11 +1152,11 @@ function renderInv(){
 
   // ── Store totals table ─────────────────────────────────────────
   const totalsHead=document.getElementById('invTotalsHead');
-  if(totalsHead) totalsHead.innerHTML=`<tr><th>Store</th><th style="text-align:right">SKUs in stock</th><th style="text-align:right">Units on hand</th><th style="text-align:right">Capacity</th><th style="text-align:right">Fill %</th><th style="text-align:right">90d Sales</th><th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th><th style="text-align:right">Days of Stock</th></tr>`;
+  if(totalsHead) totalsHead.innerHTML=`<tr><th>Store</th><th style="text-align:right">SKUs in stock</th><th style="text-align:right">Units on hand</th><th style="text-align:right">Capacity</th><th style="text-align:right">Fill %</th><th style="text-align:right">90d Sales</th><th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th><th style="text-align:right">Days of Stock</th>${showWHCols?'<th style="text-align:right">Stock in WH</th><th style="text-align:right">WH Days</th>':''}</tr>`;
   const totalsBody=document.getElementById('invTotalsBody');
   const totalsFoot=document.getElementById('invTotalsFoot');
   if(totalsBody){
-    let grandSkus=0,grandUnits=0,grandAvail=0,grandCap=0,grandVel=0,grandPY=0;
+    let grandSkus=0,grandUnits=0,grandAvail=0,grandCap=0,grandVel=0,grandPY=0,grandWH=0;
     const storeRows=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id))).map(st=>{
       const stData=allSelRows.filter(d=>d.storeId===st.id);
       if(!stData.length) return'';
@@ -1163,7 +1170,10 @@ function renderInv(){
       const tr=trendPct(vel,py);
       const fc=getForecast(vel,tr,py);
       const dailyVel=vel/90;const dos=dailyVel>0?Math.round(units/dailyVel):999;
-      grandSkus+=avail;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;
+      const stWHSeen=new Set();let whTotal=0;
+      stData.forEach(d=>{if(!stWHSeen.has(d.sku)){stWHSeen.add(d.sku);whTotal+=(d.whQty||0);}});
+      const whDays=fc&&fc>0?Math.round(whTotal*90/fc):999;
+      grandSkus+=avail;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;grandWH+=whTotal;
       return`<tr>
         <td><strong>${st.short}</strong><br><span style="font-size:10px;color:var(--muted)">${st.city||''}</span></td>
         <td style="text-align:right;font-family:monospace">${avail.toLocaleString()}</td>
@@ -1176,6 +1186,7 @@ function renderInv(){
         <td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td>
         <td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>
         <td style="text-align:right;color:${dos<=30?'var(--red)':dos<=60?'var(--amber)':'var(--muted)'}">${dos===999?'—':dos+'d'}</td>
+        ${showWHCols?`<td style="text-align:right;color:var(--blue)">${whTotal.toLocaleString()}</td><td style="text-align:right;color:${whDays<=30?'var(--red)':whDays<=60?'var(--amber)':'var(--muted)'}">${whDays===999?'—':whDays+'d'}</td>`:''}
       </tr>`;
     });
     totalsBody.innerHTML=storeRows.join('');
@@ -1195,15 +1206,17 @@ function renderInv(){
       <td style="text-align:right">${fmt30(grandFc)}</td>
       <td style="text-align:right">${fmt90(grandFc)}</td>
       <td style="text-align:right">${grandDos===999?'—':grandDos+'d'}</td>
+      ${showWHCols?(()=>{const gwd=grandFc&&grandFc>0?Math.round(grandWH*90/grandFc):999;return`<td style="text-align:right;font-weight:600">${grandWH.toLocaleString()}</td><td style="text-align:right;color:${gwd<=30?'var(--red)':gwd<=60?'var(--amber)':'var(--muted)'}">${gwd===999?'—':gwd+'d'}</td>`;})():''}
     </tr>`;
   }
 
   // ── Brand × Type grouped summary ────────────────────────────────
   const agg={};
   const capSeen=new Set();
+  const aggWHSeen=new Set();
   allSelRows.forEach(d=>{
     const k=d.brand+'|||'+d.type;
-    if(!agg[k]) agg[k]={brand:d.brand,type:d.type,onHand:0,vel90:0,py120:0,cap:0,byStore:{}};
+    if(!agg[k]) agg[k]={brand:d.brand,type:d.type,onHand:0,vel90:0,py120:0,cap:0,whQty:0,byStore:{}};
     agg[k].onHand+=d.storeQty;
     agg[k].vel90+=d.velocity90;
     agg[k].py120+=(d.priorYear90||0);
@@ -1211,6 +1224,9 @@ function renderInv(){
     const ck=d.storeId+'|'+d.brand+'|'+d.type;
     if(!capSeen.has(ck)){agg[k].cap+=(S.CAP[d.storeId]?.[d.brand]?.[d.type]||0);capSeen.add(ck);}
     agg[k].byStore[d.storeId]=(agg[k].byStore[d.storeId]||0)+d.storeQty;
+    // WH qty counted once per SKU (same SKU exists across multiple store rows)
+    const wk=k+'|||'+d.sku;
+    if(!aggWHSeen.has(wk)){agg[k].whQty+=(d.whQty||0);aggWHSeen.add(wk);}
   });
   const aggRows=Object.values(agg).sort((a,b)=>a.brand.localeCompare(b.brand)||a.type.localeCompare(b.type));
   const countEl=document.getElementById('invCount');
@@ -1223,7 +1239,7 @@ function renderInv(){
 
   const selStoresCols=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id)));
   const storeHeaders=selStoresCols.map(st=>`<th style="text-align:center;white-space:nowrap;font-size:10px">${st.short}</th>`).join('');
-  const pyHeaders=`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th>`;
+  const pyHeaders=`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th>${showWHCols?'<th style="text-align:right">Stock in WH</th><th style="text-align:right">WH Days</th>':''}`;
   const thead=`<tr><th>Brand</th><th>Type</th><th style="text-align:right">On Hand</th><th style="text-align:right">Capacity</th><th style="text-align:center">Fill %</th><th style="text-align:right">90d Sales</th>${pyHeaders}${storeHeaders}</tr>`;
   const tblHead=document.querySelector('#storeInvTable thead');
   if(tblHead) tblHead.innerHTML=thead;
@@ -1239,7 +1255,8 @@ function renderInv(){
       :`<td style="color:var(--hint);font-size:11px;padding-left:14px">└─</td>`;
     lastBrand=r.brand;
     const storeCells=selStoresCols.map(st=>{const v=r.byStore[st.id]||0;return`<td style="text-align:center;font-family:monospace;font-size:11px;color:${v>0?'var(--green)':v<0?'var(--red)':'var(--hint)'}">${v||'—'}</td>`;}).join('');
-    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>`;
+    const whDays=showWHCols&&fc&&fc>0?Math.round(r.whQty*90/fc):999;
+    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>${showWHCols?`<td style="text-align:right;color:var(--blue)">${r.whQty.toLocaleString()}</td><td style="text-align:right;color:${whDays<=30?'var(--red)':whDays<=60?'var(--amber)':'var(--muted)'}">${whDays===999?'—':whDays+'d'}</td>`:''}` ;
     return`<tr>${brandCell}<td style="font-size:11px;color:var(--muted)">${hesc(r.type)}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td>${pyCells}${storeCells}</tr>`;
   }).join('');
 }
