@@ -370,6 +370,7 @@
     <select id="invStoreFilter" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="width:auto;min-width:160px;height:72px"></select>
     <select id="invBrandFilter" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="width:auto;min-width:140px;height:72px"></select>
     <select id="invTypeFilter" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="width:auto;min-width:130px;height:72px"></select>
+    <select id="invForecastModel" onchange="renderInv()" title="Forecast model" style="align-self:center;height:28px;font-size:12px;padding:0 6px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--card);color:var(--text)"><option value="trend">Trend</option><option value="wma">WMA</option><option value="seasonal">Seasonal</option><option value="exp">EXP</option></select>
     <button class="btn btn-secondary btn-sm" onclick="resetInvFilters()" style="align-self:center">↺ Reset filters</button>
     <span id="invCount" style="font-size:11px;color:var(--muted);align-self:center"></span>
   </div>
@@ -378,26 +379,7 @@
     <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Total units on hand per store across all brands and types. Use this to cross-check against your POS reports.</div>
     <div style="overflow-x:auto">
       <table id="invTotalsTable">
-        <thead><tr>
-          <th>Store</th>
-          <th style="text-align:right">SKUs in stock</th>
-          <th style="text-align:right">Units on hand</th>
-          <th style="text-align:right">#SKUs</th>
-          <th style="text-align:right">Capacity</th>
-          <th style="text-align:right">Fill %</th>
-          <th style="text-align:right">90d Sales</th>
-          <th style="text-align:right">PY 120d</th>
-          <th style="text-align:right">Trend %</th>
-          <th style="text-align:right">Trend 30d</th>
-          <th style="text-align:right">Trend 90d</th>
-          <th style="text-align:right">WMA 30d</th>
-          <th style="text-align:right">WMA 90d</th>
-          <th style="text-align:right">Seasonal 30d</th>
-          <th style="text-align:right">Seasonal 90d</th>
-          <th style="text-align:right">EXP 30d</th>
-          <th style="text-align:right">EXP 90d</th>
-          <th style="text-align:right">Days of Stock</th>
-        </tr></thead>
+        <thead id="invTotalsHead"></thead>
         <tbody id="invTotalsBody"></tbody>
         <tfoot id="invTotalsFoot" style="font-weight:600;border-top:2px solid var(--border2)"></tfoot>
       </table>
@@ -1135,6 +1117,8 @@ function renderInv(){
   const invBrandFilter=getFilterValues('invBrandFilter');
   const invTypeFilter=getFilterValues('invTypeFilter');
   const hasPY=(S.raw.ordersPY||[]).length>0;
+  const fcModel=(document.getElementById('invForecastModel')?.value)||'trend';
+  const fcLabel={trend:'Trend',wma:'WMA',seasonal:'Seasonal',exp:'EXP'}[fcModel]||'Trend';
 
   // Helper: cap for a brand+type+store counted ONCE (not per SKU row)
   function storeCapOnce(stData,storeId){
@@ -1149,6 +1133,7 @@ function renderInv(){
   function forecastWMA(vel90,py120){if(!hasPY||!py120) return null;const pyN=py120*0.75;return Math.round(vel90*0.7+pyN*0.3);}
   function forecastSI(vel90,py120){if(!hasPY||!py120) return null;const pyN=py120*0.75;const s=vel90+pyN;return s>0?Math.round(2*vel90*pyN/s):0;}
   function forecastEXP(vel90,py120){if(!hasPY||!py120) return null;const pyN=py120*0.75;return Math.round(0.6*vel90+0.4*pyN);}
+  function getForecast(vel90,tr,py120){if(fcModel==='wma') return forecastWMA(vel90,py120);if(fcModel==='seasonal') return forecastSI(vel90,py120);if(fcModel==='exp') return forecastEXP(vel90,py120);return forecastTrend(vel90,tr);}
   function fmt30(v){return v===null?'—':Math.round(v/3).toLocaleString();}
   function fmt90(v){return v===null?'—':v.toLocaleString();}
 
@@ -1159,6 +1144,8 @@ function renderInv(){
   if(invTypeFilter.length) allSelRows=allSelRows.filter(d=>invTypeFilter.includes(d.type));
 
   // ── Store totals table ─────────────────────────────────────────
+  const totalsHead=document.getElementById('invTotalsHead');
+  if(totalsHead) totalsHead.innerHTML=`<tr><th>Store</th><th style="text-align:right">SKUs in stock</th><th style="text-align:right">Units on hand</th><th style="text-align:right">#SKUs</th><th style="text-align:right">Capacity</th><th style="text-align:right">Fill %</th><th style="text-align:right">90d Sales</th><th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th><th style="text-align:right">Days of Stock</th></tr>`;
   const totalsBody=document.getElementById('invTotalsBody');
   const totalsFoot=document.getElementById('invTotalsFoot');
   if(totalsBody){
@@ -1174,10 +1161,7 @@ function renderInv(){
       const pct=cap>0?Math.round(units/cap*100):0;
       const col=pct<30?'var(--red)':pct<60?'var(--amber)':pct<90?'var(--green)':'var(--blue)';
       const tr=trendPct(vel,py);
-      const fcT=forecastTrend(vel,tr);
-      const fcW=forecastWMA(vel,py);
-      const fcS=forecastSI(vel,py);
-      const fcE=forecastEXP(vel,py);
+      const fc=getForecast(vel,tr,py);
       const dailyVel=vel/90;const dos=dailyVel>0?Math.round(units/dailyVel):999;
       grandSkus+=avail;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;
       return`<tr>
@@ -1190,24 +1174,15 @@ function renderInv(){
         <td style="text-align:right;color:var(--blue)">${vel.toLocaleString()}</td>
         <td style="text-align:right;color:var(--muted)">${hasPY?py.toLocaleString():'—'}</td>
         <td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt30(fcT)}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt90(fcT)}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt30(fcW)}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt90(fcW)}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt30(fcS)}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt90(fcS)}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt30(fcE)}</td>
-        <td style="text-align:right;color:var(--blue)">${fmt90(fcE)}</td>
+        <td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td>
+        <td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>
         <td style="text-align:right;color:${dos<=30?'var(--red)':dos<=60?'var(--amber)':'var(--muted)'}">${dos===999?'—':dos+'d'}</td>
       </tr>`;
     });
     totalsBody.innerHTML=storeRows.join('');
     const grandPct=grandCap>0?Math.round(grandUnits/grandCap*100):0;
     const grandTr=trendPct(grandVel,grandPY);
-    const grandFcT=forecastTrend(grandVel,grandTr);
-    const grandFcW=forecastWMA(grandVel,grandPY);
-    const grandFcS=forecastSI(grandVel,grandPY);
-    const grandFcE=forecastEXP(grandVel,grandPY);
+    const grandFc=getForecast(grandVel,grandTr,grandPY);
     const grandDos=grandVel>0?Math.round(grandUnits/(grandVel/90)):999;
     totalsFoot.innerHTML=`<tr style="background:var(--bg)">
       <td><strong>TOTAL</strong></td>
@@ -1219,14 +1194,8 @@ function renderInv(){
       <td style="text-align:right">${grandVel.toLocaleString()}</td>
       <td style="text-align:right">${hasPY?grandPY.toLocaleString():'—'}</td>
       <td style="text-align:right;font-weight:600;color:${grandTr===null?'var(--muted)':grandTr>0?'var(--green)':grandTr<0?'var(--red)':'var(--muted)'}">${grandTr===null?'—':(grandTr>0?'▲ +':grandTr<0?'▼ ':'')+grandTr+'%'}</td>
-      <td style="text-align:right">${fmt30(grandFcT)}</td>
-      <td style="text-align:right">${fmt90(grandFcT)}</td>
-      <td style="text-align:right">${fmt30(grandFcW)}</td>
-      <td style="text-align:right">${fmt90(grandFcW)}</td>
-      <td style="text-align:right">${fmt30(grandFcS)}</td>
-      <td style="text-align:right">${fmt90(grandFcS)}</td>
-      <td style="text-align:right">${fmt30(grandFcE)}</td>
-      <td style="text-align:right">${fmt90(grandFcE)}</td>
+      <td style="text-align:right">${fmt30(grandFc)}</td>
+      <td style="text-align:right">${fmt90(grandFc)}</td>
       <td style="text-align:right">${grandDos===999?'—':grandDos+'d'}</td>
     </tr>`;
   }
@@ -1256,7 +1225,7 @@ function renderInv(){
 
   const selStoresCols=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id)));
   const storeHeaders=selStoresCols.map(st=>`<th style="text-align:center;white-space:nowrap;font-size:10px">${st.short}</th>`).join('');
-  const pyHeaders=`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">Trend 30d</th><th style="text-align:right">Trend 90d</th><th style="text-align:right">WMA 30d</th><th style="text-align:right">WMA 90d</th><th style="text-align:right">Seasonal 30d</th><th style="text-align:right">Seasonal 90d</th><th style="text-align:right">EXP 30d</th><th style="text-align:right">EXP 90d</th>`;
+  const pyHeaders=`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th>`;
   const thead=`<tr><th>Brand</th><th>Type</th><th style="text-align:right">On Hand</th><th style="text-align:right">Capacity</th><th style="text-align:center">Fill %</th><th style="text-align:right">90d Sales</th>${pyHeaders}${storeHeaders}</tr>`;
   const tblHead=document.querySelector('#storeInvTable thead');
   if(tblHead) tblHead.innerHTML=thead;
@@ -1266,16 +1235,13 @@ function renderInv(){
     const pct=r.cap>0?Math.round(r.onHand/r.cap*100):0;
     const col=pct<30?'var(--red)':pct<60?'var(--amber)':pct<90?'var(--green)':'var(--blue)';
     const tr=trendPct(r.vel90,r.py120);
-    const fcT=forecastTrend(r.vel90,tr);
-    const fcW=forecastWMA(r.vel90,r.py120);
-    const fcS=forecastSI(r.vel90,r.py120);
-    const fcE=forecastEXP(r.vel90,r.py120);
+    const fc=getForecast(r.vel90,tr,r.py120);
     const brandCell=r.brand!==lastBrand
       ?`<td style="font-weight:600;font-size:12px">${hesc(r.brand)}</td>`
       :`<td style="color:var(--hint);font-size:11px;padding-left:14px">└─</td>`;
     lastBrand=r.brand;
     const storeCells=selStoresCols.map(st=>{const v=r.byStore[st.id]||0;return`<td style="text-align:center;font-family:monospace;font-size:11px;color:${v>0?'var(--green)':v<0?'var(--red)':'var(--hint)'}">${v||'—'}</td>`;}).join('');
-    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fmt30(fcT)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fcT)}</td><td style="text-align:right;color:var(--blue)">${fmt30(fcW)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fcW)}</td><td style="text-align:right;color:var(--blue)">${fmt30(fcS)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fcS)}</td><td style="text-align:right;color:var(--blue)">${fmt30(fcE)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fcE)}</td>`;
+    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>`;
     return`<tr>${brandCell}<td style="font-size:11px;color:var(--muted)">${hesc(r.type)}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td>${pyCells}${storeCells}</tr>`;
   }).join('');
 }
