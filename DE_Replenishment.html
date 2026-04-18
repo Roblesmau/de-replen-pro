@@ -1145,7 +1145,7 @@ function renderInv(){
 
   // ── Store totals table ─────────────────────────────────────────
   const totalsHead=document.getElementById('invTotalsHead');
-  if(totalsHead) totalsHead.innerHTML=`<tr><th>Store</th><th style="text-align:right">SKUs in stock</th><th style="text-align:right">Units on hand</th><th style="text-align:right">#SKUs</th><th style="text-align:right">Capacity</th><th style="text-align:right">Fill %</th><th style="text-align:right">90d Sales</th><th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th><th style="text-align:right">Days of Stock</th></tr>`;
+  if(totalsHead) totalsHead.innerHTML=`<tr><th>Store</th><th style="text-align:right">SKUs in stock</th><th style="text-align:right">Units on hand</th><th style="text-align:right">Capacity</th><th style="text-align:right">Fill %</th><th style="text-align:right">90d Sales</th><th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th><th style="text-align:right">Days of Stock</th></tr>`;
   const totalsBody=document.getElementById('invTotalsBody');
   const totalsFoot=document.getElementById('invTotalsFoot');
   if(totalsBody){
@@ -1168,7 +1168,6 @@ function renderInv(){
         <td><strong>${st.short}</strong><br><span style="font-size:10px;color:var(--muted)">${st.city||''}</span></td>
         <td style="text-align:right;font-family:monospace">${avail.toLocaleString()}</td>
         <td style="text-align:right;font-size:14px;font-weight:600">${units.toLocaleString()}</td>
-        <td style="text-align:right;color:var(--green)">${avail.toLocaleString()}</td>
         <td style="text-align:right;color:var(--muted)">${cap.toLocaleString()}</td>
         <td style="text-align:right"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:4px;border-radius:2px;background:var(--border);margin-top:3px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td>
         <td style="text-align:right;color:var(--blue)">${vel.toLocaleString()}</td>
@@ -1188,7 +1187,6 @@ function renderInv(){
       <td><strong>TOTAL</strong></td>
       <td style="text-align:right;font-family:monospace">${grandSkus.toLocaleString()}</td>
       <td style="text-align:right;font-size:14px;font-weight:700">${grandUnits.toLocaleString()}</td>
-      <td style="text-align:right">${grandAvail.toLocaleString()}</td>
       <td style="text-align:right">${grandCap.toLocaleString()}</td>
       <td style="text-align:right;font-weight:700">${grandPct}%</td>
       <td style="text-align:right">${grandVel.toLocaleString()}</td>
