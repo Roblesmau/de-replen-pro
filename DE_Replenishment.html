@@ -1036,14 +1036,26 @@ function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];
 
 function updateDash(){
   const fd=getFD();
-  const tq=fd.reduce((a,b)=>a+b.storeQty,0),tc=fd.reduce((a,b)=>a+b.cap,0);
+  // Dedup capacity by (store, brand, type) to avoid multiplying cap across SKU rows
+  const capSeenD=new Set();const whSeenD=new Set();
+  let tq=0,tc=0,twh=0,twhVal=0,tsv=0;
+  const critSet=new Set();
+  fd.forEach(d=>{
+    tq+=d.storeQty;
+    tsv+=d.storeQty*(d.cost||0);
+    const ck=d.storeId+'|'+d.brand+'|'+d.type;
+    if(!capSeenD.has(ck)){tc+=d.cap;capSeenD.add(ck);}
+    const wk=d.sku||(d.brand+'|'+d.type);
+    if(!whSeenD.has(wk)){twh+=(d.whQty||0);twhVal+=(d.whQty||0)*(d.cost||0);whSeenD.add(wk);}
+    if(d.cap>0&&d.storeQty/d.cap<0.3) critSet.add(d.storeId+'|'+d.brand+'|'+d.type);
+  });
   const fill=tc>0?Math.round(tq/tc*100):0;
   const fc=fill<30?'#E24B4A':fill<60?'#BA7517':fill<90?'#3B6D11':'#185FA5';
-  const crit=fd.filter(d=>d.cap>0&&d.storeQty/d.cap<0.3).length;
+  const crit=critSet.size;
   document.getElementById('dashMetrics').innerHTML=`
-    <div class="metric-card"><div class="metric-val">${S.vm==='dollars'?'$'+Math.round(fd.reduce((a,b)=>a+b.storeQty*b.cost,0)).toLocaleString():tq.toLocaleString()}</div><div class="metric-lbl">Store inventory</div></div>
-    <div class="metric-card"><div class="metric-val" style="color:${fc}">${fill}%</div><div class="metric-lbl">Fill rate</div><div class="metric-sub">${tq} / ${tc} units</div></div>
-    <div class="metric-card"><div class="metric-val">${S.vm==='dollars'?'$'+Math.round(fd.reduce((a,b)=>a+b.whQty*b.cost,0)).toLocaleString():fd.reduce((a,b)=>a+b.whQty,0)}</div><div class="metric-lbl">WH available</div></div>
+    <div class="metric-card"><div class="metric-val">${S.vm==='dollars'?'$'+Math.round(tsv).toLocaleString():tq.toLocaleString()}</div><div class="metric-lbl">Store inventory</div></div>
+    <div class="metric-card"><div class="metric-val" style="color:${fc}">${fill}%</div><div class="metric-lbl">Fill rate</div><div class="metric-sub">${tq.toLocaleString()} / ${tc.toLocaleString()} units</div></div>
+    <div class="metric-card"><div class="metric-val">${S.vm==='dollars'?'$'+Math.round(twhVal).toLocaleString():twh.toLocaleString()}</div><div class="metric-lbl">WH available</div></div>
     <div class="metric-card"><div class="metric-val" style="color:${crit>0?'#E24B4A':'#3B6D11'}">${crit}</div><div class="metric-lbl">Critical slots</div></div>`;
   document.getElementById('unitsTitle').textContent=S.vm==='dollars'?'Inventory value by store':'Units on hand by store';
   renderFillChart(fd);renderUnitsChart(fd);renderVelChart(fd);renderUnderstocked(fd);
@@ -1156,7 +1168,21 @@ function renderVelChart(fd){
   charts['vel']=new Chart(canvas,{type:'bar',data:{labels,datasets:[{label:'90d velocity',data:labels.map(b=>Math.round(byB[b].v)),backgroundColor:'#378ADD',borderRadius:4,borderSkipped:false},{label:'WH stock',data:labels.map(b=>Math.round(byB[b].w)),backgroundColor:'#97C459',borderRadius:4,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index'}},scales:{x:{ticks:{font:{size:11},maxRotation:45,autoSkip:labels.length>15}},y:{ticks:{font:{size:11}},grid:{color:'rgba(0,0,0,0.04)'}}}}});
 }
 function renderUnderstocked(fd){
-  const combos={};fd.forEach(d=>{const k=`${d.brand}|${d.type}`;if(!combos[k])combos[k]={brand:d.brand,type:d.type,qty:0,cap:0,vel:0,wh:0};combos[k].qty+=d.storeQty;combos[k].cap+=d.cap;combos[k].vel+=d.velocity90;combos[k].wh+=d.whQty;});
+  const combos={};
+  const capSeen=new Set();
+  const whSeen=new Set();
+  fd.forEach(d=>{
+    const k=`${d.brand}|${d.type}`;
+    if(!combos[k]) combos[k]={brand:d.brand,type:d.type,qty:0,cap:0,vel:0,wh:0};
+    combos[k].qty+=d.storeQty;
+    combos[k].vel+=d.velocity90;
+    // Dedup capacity by (store, brand, type) — same fix as fill rate chart
+    const ck=d.storeId+'|'+k;
+    if(!capSeen.has(ck)){combos[k].cap+=d.cap;capSeen.add(ck);}
+    // Dedup WH qty by sku — same WH item shouldn't be counted per store
+    const wk=(d.sku||k);
+    if(!whSeen.has(wk)){combos[k].wh+=(d.whQty||0);whSeen.add(wk);}
+  });
   const rows=Object.values(combos).filter(c=>c.cap>0).map(c=>({...c,fill:Math.round(c.qty/c.cap*100),gap:Math.max(0,c.vel-c.qty)})).sort((a,b)=>a.fill-b.fill).slice(0,7);
   document.getElementById('understocked').innerHTML=`<table><thead><tr><th>Brand + type</th><th>Fill %</th><th>Store qty</th><th>WH</th><th>Gap</th></tr></thead><tbody>${rows.map(r=>`<tr><td><strong>${r.brand}</strong><br><span style="font-size:10px;color:var(--muted)">${r.type}</span></td><td><span class="pill ${r.fill<30?'p-err':r.fill<60?'p-warn':'p-ok'}">${r.fill}%</span><div class="prog"><div class="prog-fill" style="width:${r.fill}%;background:${r.fill<30?'#E24B4A':r.fill<60?'#EF9F27':'#639922'}"></div></div></td><td>${r.qty}</td><td style="color:var(--green)">${r.wh}</td><td><span class="pill ${r.gap>0?'p-warn':'p-ok'}">${r.gap>0?'+'+r.gap:'OK'}</span></td></tr>`).join('')}</tbody></table>`;
 }
