@@ -1137,13 +1137,6 @@ function renderInv(){
   function fmt30(v){return v===null?'—':Math.round(v/3).toLocaleString();}
   function fmt90(v){return v===null?'—':v.toLocaleString();}
 
-  // ── WH columns visibility: only when all filters fully selected and bin contents loaded ──
-  const _sfEl=document.getElementById('invStoreFilter');
-  const _bfEl=document.getElementById('invBrandFilter');
-  const _tfEl=document.getElementById('invTypeFilter');
-  const _allSel=el=>!el||[...el.options].filter(o=>o.value!=='__all__').every(o=>o.selected);
-  const showWHCols=_allSel(_sfEl)&&_allSel(_bfEl)&&_allSel(_tfEl)&&(S.wh||[]).length>0;
-
   // ── Apply filters ──────────────────────────────────────────────
   let allSelRows=DATA.filter(d=>sel.includes(d.storeId));
   if(invStoreFilter.length) allSelRows=allSelRows.filter(d=>invStoreFilter.includes(d.storeId));
@@ -1152,11 +1145,11 @@ function renderInv(){
 
   // ── Store totals table ─────────────────────────────────────────
   const totalsHead=document.getElementById('invTotalsHead');
-  if(totalsHead) totalsHead.innerHTML=`<tr><th>Store</th><th style="text-align:right">SKUs in stock</th><th style="text-align:right">Units on hand</th><th style="text-align:right">Capacity</th><th style="text-align:right">Fill %</th><th style="text-align:right">90d Sales</th><th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th><th style="text-align:right">Days of Stock</th>${showWHCols?'<th style="text-align:right">Stock in WH</th><th style="text-align:right">WH Days</th>':''}</tr>`;
+  if(totalsHead) totalsHead.innerHTML=`<tr><th>Store</th><th style="text-align:right">SKUs in stock</th><th style="text-align:right">Units on hand</th><th style="text-align:right">Capacity</th><th style="text-align:right">Fill %</th><th style="text-align:right">90d Sales</th><th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th><th style="text-align:right">Days of Stock</th></tr>`;
   const totalsBody=document.getElementById('invTotalsBody');
   const totalsFoot=document.getElementById('invTotalsFoot');
   if(totalsBody){
-    let grandSkus=0,grandUnits=0,grandAvail=0,grandCap=0,grandVel=0,grandPY=0,grandWH=0;
+    let grandSkus=0,grandUnits=0,grandAvail=0,grandCap=0,grandVel=0,grandPY=0;
     const storeRows=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id))).map(st=>{
       const stData=allSelRows.filter(d=>d.storeId===st.id);
       if(!stData.length) return'';
@@ -1170,10 +1163,7 @@ function renderInv(){
       const tr=trendPct(vel,py);
       const fc=getForecast(vel,tr,py);
       const dailyVel=vel/90;const dos=dailyVel>0?Math.round(units/dailyVel):999;
-      const stWHSeen=new Set();let whTotal=0;
-      stData.forEach(d=>{if(!stWHSeen.has(d.sku)){stWHSeen.add(d.sku);whTotal+=(d.whQty||0);}});
-      const whDays=fc&&fc>0?Math.round(whTotal*90/fc):999;
-      grandSkus+=avail;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;grandWH+=whTotal;
+      grandSkus+=avail;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;
       return`<tr>
         <td><strong>${st.short}</strong><br><span style="font-size:10px;color:var(--muted)">${st.city||''}</span></td>
         <td style="text-align:right;font-family:monospace">${avail.toLocaleString()}</td>
