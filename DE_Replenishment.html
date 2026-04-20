@@ -1176,7 +1176,6 @@ function renderInv(){
         <td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td>
         <td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>
         <td style="text-align:right;color:${dos<=30?'var(--red)':dos<=60?'var(--amber)':'var(--muted)'}">${dos===999?'—':dos+'d'}</td>
-        ${showWHCols?`<td style="text-align:right;color:var(--blue)">${whTotal.toLocaleString()}</td><td style="text-align:right;color:${whDays<=30?'var(--red)':whDays<=60?'var(--amber)':'var(--muted)'}">${whDays===999?'—':whDays+'d'}</td>`:''}
       </tr>`;
     });
     totalsBody.innerHTML=storeRows.join('');
@@ -1196,7 +1195,6 @@ function renderInv(){
       <td style="text-align:right">${fmt30(grandFc)}</td>
       <td style="text-align:right">${fmt90(grandFc)}</td>
       <td style="text-align:right">${grandDos===999?'—':grandDos+'d'}</td>
-      ${showWHCols?(()=>{const gwd=grandFc&&grandFc>0?Math.round(grandWH*90/grandFc):999;return`<td style="text-align:right;font-weight:600">${grandWH.toLocaleString()}</td><td style="text-align:right;color:${gwd<=30?'var(--red)':gwd<=60?'var(--amber)':'var(--muted)'}">${gwd===999?'—':gwd+'d'}</td>`;})():''}
     </tr>`;
   }
 
@@ -1229,7 +1227,7 @@ function renderInv(){
 
   const selStoresCols=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id)));
   const storeHeaders=selStoresCols.map(st=>`<th style="text-align:center;white-space:nowrap;font-size:10px">${st.short}</th>`).join('');
-  const pyHeaders=`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th>${showWHCols?'<th style="text-align:right">Stock in WH</th><th style="text-align:right">WH Days</th>':''}`;
+  const pyHeaders=`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th>`;
   const thead=`<tr><th>Brand</th><th>Type</th><th style="text-align:right">On Hand</th><th style="text-align:right">Capacity</th><th style="text-align:center">Fill %</th><th style="text-align:right">90d Sales</th>${pyHeaders}${storeHeaders}</tr>`;
   const tblHead=document.querySelector('#storeInvTable thead');
   if(tblHead) tblHead.innerHTML=thead;
@@ -1245,8 +1243,7 @@ function renderInv(){
       :`<td style="color:var(--hint);font-size:11px;padding-left:14px">└─</td>`;
     lastBrand=r.brand;
     const storeCells=selStoresCols.map(st=>{const v=r.byStore[st.id]||0;return`<td style="text-align:center;font-family:monospace;font-size:11px;color:${v>0?'var(--green)':v<0?'var(--red)':'var(--hint)'}">${v||'—'}</td>`;}).join('');
-    const whDays=showWHCols&&fc&&fc>0?Math.round(r.whQty*90/fc):999;
-    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>${showWHCols?`<td style="text-align:right;color:var(--blue)">${r.whQty.toLocaleString()}</td><td style="text-align:right;color:${whDays<=30?'var(--red)':whDays<=60?'var(--amber)':'var(--muted)'}">${whDays===999?'—':whDays+'d'}</td>`:''}` ;
+    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>`;
     return`<tr>${brandCell}<td style="font-size:11px;color:var(--muted)">${hesc(r.type)}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td>${pyCells}${storeCells}</tr>`;
   }).join('');
 }
@@ -1397,74 +1394,78 @@ function parsePaste(){
   processWHRows(rows);
 }
 function processWHRows(rows){
-  // Use global normSku() — strips apostrophes, trims whitespace
-  const totals={};
-  rows.forEach(r=>{
-    const sku=normSku(r.sku).toLowerCase();
-    if(!sku||sku==='item no.') return;
-    totals[sku]=(totals[sku]||0)+(parseInt(r.qty)||0);
-  });
+  try{
+    // Use global normSku() — strips apostrophes, trims whitespace
+    const totals={};
+    rows.forEach(r=>{
+      const sku=normSku(r.sku).toLowerCase();
+      if(!sku||sku==='item no.') return;
+      totals[sku]=(totals[sku]||0)+(parseInt(r.qty)||0);
+    });
 
-  // Build lookup from full itemMap catalog (all variants, regardless of store stock)
-  // DATA only contains SKUs with current store stock — misses warehouse-only items
-  const catalogSkuMap={};  // normalized sku (lowercase) → {brand, type, desc}
-  Object.values(S.raw.itemMap||{}).forEach(v=>{
-    if(!v.variantSku) return;
-    const k=normSku(v.variantSku).toLowerCase();
-    if(!catalogSkuMap[k]) catalogSkuMap[k]={brand:v.brand||'',type:v.type||'',desc:v.desc||''};
-  });
-  // Also include DATA as fallback (has real-time store context)
-  const dataSkuMap={};
-  DATA.forEach(d=>{
-    const k=normSku(d.sku).toLowerCase();
-    if(!dataSkuMap[k]) dataSkuMap[k]=d;
-  });
+    // Build lookup from full itemMap catalog (all variants, regardless of store stock)
+    // DATA only contains SKUs with current store stock — misses warehouse-only items
+    const catalogSkuMap={};  // normalized sku (lowercase) → {brand, type, desc}
+    Object.values(S.raw.itemMap||{}).forEach(v=>{
+      if(!v.variantSku) return;
+      const k=normSku(v.variantSku).toLowerCase();
+      if(!catalogSkuMap[k]) catalogSkuMap[k]={brand:v.brand||'',type:v.type||'',desc:v.desc||''};
+    });
+    // Also include DATA as fallback (has real-time store context)
+    const dataSkuMap={};
+    DATA.forEach(d=>{
+      const k=normSku(d.sku).toLowerCase();
+      if(!dataSkuMap[k]) dataSkuMap[k]=d;
+    });
 
-  S.wh=Object.entries(totals).map(([sku,qty])=>{
-    const fromCatalog=catalogSkuMap[sku];
-    const fromData=dataSkuMap[sku];
-    const matched=!!(fromCatalog||fromData);
-    return{
-      sku,
-      whQty:qty,
-      brand:fromData?.brand||fromCatalog?.brand||'',
-      type:fromData?.type||fromCatalog?.type||'',
-      name:fromData?.desc||fromCatalog?.desc||'',
-      matched
-    };
-  });
+    S.wh=Object.entries(totals).map(([sku,qty])=>{
+      const fromCatalog=catalogSkuMap[sku];
+      const fromData=dataSkuMap[sku];
+      const matched=!!(fromCatalog||fromData);
+      return{
+        sku,
+        whQty:qty,
+        brand:fromData?.brand||fromCatalog?.brand||'',
+        type:fromData?.type||fromCatalog?.type||'',
+        name:fromData?.desc||fromCatalog?.desc||'',
+        matched
+      };
+    });
 
-  // Update whQty in DATA rows
-  S.wh.forEach(w=>{
-    DATA.filter(d=>normSku(d.sku).toLowerCase()===w.sku).forEach(d=>{d.whQty=w.whQty;});
-  });
-  buildRecos();
-  const matched=S.wh.filter(r=>r.matched).length;
-  const totalWHUnits=S.wh.reduce((a,b)=>a+b.whQty,0);
-  const matchedWHUnits=S.wh.filter(r=>r.matched).reduce((a,b)=>a+b.whQty,0);
-  const unitMatchPct=totalWHUnits>0?Math.round(matchedWHUnits/totalWHUnits*100):0;
-  // WH data stored in S.wh — view in Raw Data Inspector
-  const matchPct=S.wh.length>0?Math.round(matched/S.wh.length*100):0;
-  showWHStatus(
-    '✓ '+S.wh.length.toLocaleString()+' WH SKUs · '+
-    matched.toLocaleString()+' matched ('+matchPct+'%) · '+
-    totalWHUnits.toLocaleString()+' total units · '+
-    matchedWHUnits.toLocaleString()+' matched units ('+unitMatchPct+'%)',
-    matched>0?'s-ok':'s-warn'
-  );
-  if(matched>0){
-    setStep(3,'ok');
-    const st3=document.getElementById('st3');
-    if(st3) st3.textContent='3 · WH: '+totalWHUnits.toLocaleString()+' units ✓';
-    const bwh=document.getElementById('btnWH');
-    if(bwh){bwh.textContent='✓ Bin Contents loaded';bwh.className='btn btn-sm';bwh.style.cssText='background:var(--green-bg);color:var(--green);border:1px solid #97C459;padding:5px 11px;font-size:11px;border-radius:var(--radius);cursor:pointer';}
+    // Update whQty in DATA rows
+    S.wh.forEach(w=>{
+      DATA.filter(d=>normSku(d.sku).toLowerCase()===w.sku).forEach(d=>{d.whQty=w.whQty;});
+    });
+    buildRecos();
+    const matched=S.wh.filter(r=>r.matched).length;
+    const totalWHUnits=S.wh.reduce((a,b)=>a+b.whQty,0);
+    const matchedWHUnits=S.wh.filter(r=>r.matched).reduce((a,b)=>a+b.whQty,0);
+    const unitMatchPct=totalWHUnits>0?Math.round(matchedWHUnits/totalWHUnits*100):0;
+    // WH data stored in S.wh — view in Raw Data Inspector
+    const matchPct=S.wh.length>0?Math.round(matched/S.wh.length*100):0;
+    showWHStatus(
+      '✓ '+S.wh.length.toLocaleString()+' WH SKUs · '+
+      matched.toLocaleString()+' matched ('+matchPct+'%) · '+
+      totalWHUnits.toLocaleString()+' total units · '+
+      matchedWHUnits.toLocaleString()+' matched units ('+unitMatchPct+'%)',
+      matched>0?'s-ok':'s-warn'
+    );
+    if(matched>0){
+      setStep(3,'ok');
+      const st3=document.getElementById('st3');
+      if(st3) st3.textContent='3 · WH: '+totalWHUnits.toLocaleString()+' units ✓';
+      const bwh=document.getElementById('btnWH');
+      if(bwh){bwh.textContent='✓ Bin Contents loaded';bwh.className='btn btn-sm';bwh.style.cssText='background:var(--green-bg);color:var(--green);border:1px solid #97C459;padding:5px 11px;font-size:11px;border-radius:var(--radius);cursor:pointer';}
+    }
+    // Refresh all UI panels with updated whQty
+    renderStoreGrid();
+    populateInvFilters();
+    renderInv();
+    populateDashFilters();
+    if(typeof renderDash==='function') renderDash();
+  }catch(e){
+    showWHStatus('✗ '+e.message+' [<a href="#" onclick="document.getElementById(\'whFileInput\').click();return false" style="color:inherit;text-decoration:underline;cursor:pointer">Retry</a>]','s-err');
   }
-  // Refresh all UI panels with updated whQty
-  renderStoreGrid();
-  populateInvFilters();
-  renderInv();
-  populateDashFilters();
-  if(typeof renderDash==='function') renderDash();
 }
 
 
