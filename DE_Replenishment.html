@@ -345,7 +345,8 @@
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Send-units simulator</div>
+    <div class="card-title">Send-units simulator <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px">Preview the impact of a WH→store transfer before committing</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">Pick a store + brand + type, slide the unit count. See the resulting fill rate, days of stock, remaining WH pool, and how many other stores would still be critical. Use this to decide whether to proceed with a transfer, hold stock for another store, or split the allocation.</div>
     <div class="row row3" style="margin-bottom:10px">
       <div class="field"><label>Store</label><select id="simStore" onchange="simulate()"><option value="">Select...</option></select></div>
       <div class="field"><label>Brand</label><select id="simBrand" onchange="simulate()"><option value="">Select...</option></select></div>
@@ -1009,8 +1010,27 @@ function populateDashFilters(){
   fill('dfType',TYPES,'All types');
 }
 function getFD(){
-  const s=document.getElementById('dfStore').value,b=document.getElementById('dfBrand').value,t=document.getElementById('dfType').value;
-  return DATA.filter(d=>(!s||d.storeId===s.split(' ')[0])&&(!b||d.brand===b)&&(!t||d.type===t));
+  // Dashboard inherits filters from Inventory tab (multi-select)
+  const invStores=getFilterValues('invStoreFilter');
+  const invBrands=getFilterValues('invBrandFilter');
+  const invTypes=getFilterValues('invTypeFilter');
+  // Fallback to Dashboard single-select if Inventory filters not initialized
+  const s=document.getElementById('dfStore')?.value||'';
+  const b=document.getElementById('dfBrand')?.value||'';
+  const t=document.getElementById('dfType')?.value||'';
+  return DATA.filter(d=>
+    (invStores.length?invStores.includes(d.storeId):(!s||d.storeId===s.split(' ')[0]))&&
+    (invBrands.length?invBrands.includes(d.brand):(!b||d.brand===b))&&
+    (invTypes.length?invTypes.includes(d.type):(!t||d.type===t))
+  );
+}
+// Return brands currently selected in Inventory filter, or all brands from DATA as fallback
+function getActiveBrands(){
+  const invBrands=getFilterValues('invBrandFilter');
+  if(invBrands.length) return invBrands;
+  const b=document.getElementById('dfBrand')?.value||'';
+  if(b) return [b];
+  return [];
 }
 function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
 
@@ -1030,30 +1050,110 @@ function updateDash(){
 }
 
 function renderFillChart(fd){
-  if(!document.getElementById('cFill')) return;
+  const canvas=document.getElementById('cFill');
+  if(!canvas) return;
   destroyChart('fill');
-  const byStore={};STORES.forEach(st=>{byStore[st.id]={s:st.short,q:0,c:0};});
-  fd.forEach(d=>{if(byStore[d.storeId]){byStore[d.storeId].q+=d.storeQty;byStore[d.storeId].c+=d.cap;}});
+  // Aggregate per store with dedup on (store, brand, type) to avoid counting capacity multiple times
+  const byStore={};
+  const capSeen=new Set();
+  fd.forEach(d=>{
+    if(!byStore[d.storeId]) byStore[d.storeId]={s:(STORES.find(st=>st.id===d.storeId)||{}).short||d.storeId,q:0,c:0};
+    byStore[d.storeId].q+=d.storeQty;
+    const k=d.storeId+'|'+d.brand+'|'+d.type;
+    if(!capSeen.has(k)){byStore[d.storeId].c+=d.cap;capSeen.add(k);}
+  });
   const en=Object.values(byStore).filter(s=>s.c>0);
+  const parent=canvas.parentElement;
+  let emptyEl=parent.querySelector('.chart-empty');
+  if(!en.length){
+    canvas.style.display='none';
+    if(!emptyEl){emptyEl=document.createElement('div');emptyEl.className='chart-empty';emptyEl.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:20px';parent.appendChild(emptyEl);}
+    emptyEl.textContent='Select brands above to see fill rates';
+    return;
+  }
+  if(emptyEl) emptyEl.remove();
+  canvas.style.display='block';
   const pcts=en.map(s=>Math.round(s.q/s.c*100));
-  charts['fill']=new Chart(document.getElementById('cFill'),{type:'bar',data:{labels:en.map(s=>s.s),datasets:[{data:pcts,backgroundColor:pcts.map(p=>p<30?'#E24B4A':p<60?'#EF9F27':p<90?'#639922':'#185FA5'),borderRadius:5,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+'%'}}},scales:{x:{ticks:{font:{size:11},maxRotation:30,autoSkip:false}},y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:11}},grid:{color:'rgba(0,0,0,0.04)'}}}}});
+  charts['fill']=new Chart(canvas,{type:'bar',data:{labels:en.map(s=>s.s),datasets:[{data:pcts,backgroundColor:pcts.map(p=>p<30?'#E24B4A':p<60?'#EF9F27':p<90?'#639922':'#185FA5'),borderRadius:5,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+'%'}}},scales:{x:{ticks:{font:{size:11},maxRotation:30,autoSkip:false}},y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:11}},grid:{color:'rgba(0,0,0,0.04)'}}}}});
 }
 function renderUnitsChart(fd){
-  if(!document.getElementById('cUnits')) return;
+  const canvas=document.getElementById('cUnits');
+  if(!canvas) return;
   destroyChart('units');
-  const fb=document.getElementById('dfBrand').value,ft=document.getElementById('dfType').value;
-  const labels=STORES.map(s=>s.short);
+  const parent=canvas.parentElement;
+  let emptyEl=parent.querySelector('.chart-empty');
+  // Get active filter values from Inventory or Dashboard fallback
+  const active=getActiveBrands();
+  const invTypes=getFilterValues('invTypeFilter');
+  const invStores=getFilterValues('invStoreFilter');
+  const ft=document.getElementById('dfType')?.value||'';
+  // Only show stores present in filter (or all if none selected)
+  const activeStores=invStores.length?STORES.filter(s=>invStores.includes(s.id)):STORES;
+  const labels=activeStores.map(s=>s.short);
   let ds=[];
-  if(fb){const vt=ft?[ft]:TYPES;ds=vt.map(t=>({label:t,data:STORES.map(st=>Math.round(fd.filter(d=>d.storeId===st.id&&d.type===t).reduce((a,b)=>a+val(b),0))),backgroundColor:TCOL[t],borderRadius:4,borderSkipped:false}));document.getElementById('unitsLeg').innerHTML=vt.map(t=>`<span class="leg-item"><span class="leg-sq" style="background:${TCOL[t]}"></span>${t}</span>`).join('');}
-  else{const vb=BRANDS.slice(0,6);ds=vb.map(b=>({label:b,data:STORES.map(st=>Math.round(fd.filter(d=>d.storeId===st.id&&d.brand===b).reduce((a,x)=>a+val(x),0))),backgroundColor:BCOL[b],borderRadius:4,borderSkipped:false}));document.getElementById('unitsLeg').innerHTML=vb.map(b=>`<span class="leg-item"><span class="leg-sq" style="background:${BCOL[b]}"></span>${b}</span>`).join('');}
-  charts['units']=new Chart(document.getElementById('cUnits'),{type:'bar',data:{labels,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{stacked:true,ticks:{font:{size:11},maxRotation:30,autoSkip:false}},y:{stacked:true,ticks:{font:{size:11},callback:v=>S.vm==='dollars'?'$'+v:v},grid:{color:'rgba(0,0,0,0.04)'}}}}});
+  const paletteColors=['#378ADD','#97C459','#EF9F27','#C17AEB','#E24B4A','#53C1A8','#F5A623','#6D7B8D','#B86ED4','#3B6D11'];
+  if(!fd.length||!activeStores.length){
+    canvas.style.display='none';
+    if(!emptyEl){emptyEl=document.createElement('div');emptyEl.className='chart-empty';emptyEl.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:20px';parent.appendChild(emptyEl);}
+    emptyEl.textContent='Select brands above to see units on hand';
+    document.getElementById('unitsLeg').innerHTML='';
+    return;
+  }
+  if(emptyEl) emptyEl.remove();
+  canvas.style.display='block';
+  if(active.length===1){
+    // Single brand: break down by type
+    const brand=active[0];
+    const activeTypes=invTypes.length?invTypes:(ft?[ft]:[...new Set(fd.filter(d=>d.brand===brand).map(d=>d.type))].sort());
+    ds=activeTypes.map((t,i)=>({label:t,data:activeStores.map(st=>Math.round(fd.filter(d=>d.storeId===st.id&&d.brand===brand&&d.type===t).reduce((a,b)=>a+val(b),0))),backgroundColor:TCOL[t]||paletteColors[i%paletteColors.length],borderRadius:4,borderSkipped:false}));
+    document.getElementById('unitsLeg').innerHTML=activeTypes.map((t,i)=>`<span class="leg-item"><span class="leg-sq" style="background:${TCOL[t]||paletteColors[i%paletteColors.length]}"></span>${t}</span>`).join('');
+  } else {
+    // Multi-brand or no selection: show top 6 brands from filtered data
+    const brandTotals={};
+    (active.length?active:[...new Set(fd.map(d=>d.brand))]).forEach(b=>{brandTotals[b]=fd.filter(d=>d.brand===b).reduce((a,x)=>a+val(x),0);});
+    const vb=Object.entries(brandTotals).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([b])=>b);
+    ds=vb.map((b,i)=>({label:b,data:activeStores.map(st=>Math.round(fd.filter(d=>d.storeId===st.id&&d.brand===b).reduce((a,x)=>a+val(x),0))),backgroundColor:BCOL[b]||paletteColors[i%paletteColors.length],borderRadius:4,borderSkipped:false}));
+    document.getElementById('unitsLeg').innerHTML=vb.map((b,i)=>`<span class="leg-item"><span class="leg-sq" style="background:${BCOL[b]||paletteColors[i%paletteColors.length]}"></span>${b}</span>`).join('');
+  }
+  charts['units']=new Chart(canvas,{type:'bar',data:{labels,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{stacked:true,ticks:{font:{size:11},maxRotation:30,autoSkip:false}},y:{stacked:true,ticks:{font:{size:11},callback:v=>S.vm==='dollars'?'$'+v:v},grid:{color:'rgba(0,0,0,0.04)'}}}}});
 }
 function renderVelChart(fd){
-  if(!document.getElementById('cVel')) return;
+  const canvas=document.getElementById('cVel');
+  if(!canvas) return;
   destroyChart('vel');
-  const byB={};BRANDS.forEach(b=>{byB[b]={v:0,w:0};});
-  fd.forEach(d=>{byB[d.brand].v+=d.velocity90;byB[d.brand].w+=d.whQty;});
-  charts['vel']=new Chart(document.getElementById('cVel'),{type:'bar',data:{labels:BRANDS,datasets:[{label:'90d velocity',data:BRANDS.map(b=>Math.round(byB[b].v)),backgroundColor:'#378ADD',borderRadius:4,borderSkipped:false},{label:'WH stock',data:BRANDS.map(b=>Math.round(byB[b].w)),backgroundColor:'#97C459',borderRadius:4,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:11},maxRotation:30,autoSkip:false}},y:{ticks:{font:{size:11}},grid:{color:'rgba(0,0,0,0.04)'}}}}});
+  const parent=canvas.parentElement;
+  let emptyEl=parent.querySelector('.chart-empty');
+  // Only show brands actively selected in Inventory filter
+  const active=getActiveBrands();
+  if(!active.length){
+    canvas.style.display='none';
+    if(!emptyEl){emptyEl=document.createElement('div');emptyEl.className='chart-empty';emptyEl.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:20px';parent.appendChild(emptyEl);}
+    emptyEl.textContent='Select brands above to compare velocity vs WH stock';
+    return;
+  }
+  const byB={};
+  // Dedup WH qty per SKU within brand (avoid counting same WH item for multiple stores)
+  const whSkuSeen={};
+  active.forEach(b=>{byB[b]={v:0,w:0};whSkuSeen[b]=new Set();});
+  fd.forEach(d=>{
+    if(!byB[d.brand]) return;
+    byB[d.brand].v+=d.velocity90;
+    const whKey=d.sku||(d.brand+'|'+d.type);
+    if(!whSkuSeen[d.brand].has(whKey)){byB[d.brand].w+=(d.whQty||0);whSkuSeen[d.brand].add(whKey);}
+  });
+  // Sort brands by combined volume for better visualization
+  const sortedBrands=active.slice().sort((a,b)=>(byB[b].v+byB[b].w)-(byB[a].v+byB[a].w));
+  // Filter out brands with zero data
+  const labels=sortedBrands.filter(b=>byB[b].v>0||byB[b].w>0);
+  if(!labels.length){
+    canvas.style.display='none';
+    if(!emptyEl){emptyEl=document.createElement('div');emptyEl.className='chart-empty';emptyEl.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:20px';parent.appendChild(emptyEl);}
+    emptyEl.textContent='No velocity or WH stock data for selected brands';
+    return;
+  }
+  if(emptyEl) emptyEl.remove();
+  canvas.style.display='block';
+  charts['vel']=new Chart(canvas,{type:'bar',data:{labels,datasets:[{label:'90d velocity',data:labels.map(b=>Math.round(byB[b].v)),backgroundColor:'#378ADD',borderRadius:4,borderSkipped:false},{label:'WH stock',data:labels.map(b=>Math.round(byB[b].w)),backgroundColor:'#97C459',borderRadius:4,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index'}},scales:{x:{ticks:{font:{size:11},maxRotation:45,autoSkip:labels.length>15}},y:{ticks:{font:{size:11}},grid:{color:'rgba(0,0,0,0.04)'}}}}});
 }
 function renderUnderstocked(fd){
   const combos={};fd.forEach(d=>{const k=`${d.brand}|${d.type}`;if(!combos[k])combos[k]={brand:d.brand,type:d.type,qty:0,cap:0,vel:0,wh:0};combos[k].qty+=d.storeQty;combos[k].cap+=d.cap;combos[k].vel+=d.velocity90;combos[k].wh+=d.whQty;});
@@ -1064,7 +1164,13 @@ function renderUnderstocked(fd){
 // Simulator
 function populateSimSelects(){
   document.getElementById('simStore').innerHTML='<option value="">Select store...</option>'+STORES.map(s=>`<option value="${s.id}">${s.id} — ${s.short}</option>`).join('');
-  document.getElementById('simBrand').innerHTML='<option value="">Select brand...</option>'+BRANDS.map(b=>`<option>${b}</option>`).join('');
+  // Use brands from actual DATA (not hardcoded BRANDS) for accuracy
+  const realBrands=DATA.length?[...new Set(DATA.map(d=>d.brand))].filter(b=>b&&b!=='Unknown').sort():BRANDS;
+  document.getElementById('simBrand').innerHTML='<option value="">Select brand...</option>'+realBrands.map(b=>`<option>${b}</option>`).join('');
+  // Populate real types dynamically instead of hardcoded Sunglasses/Optical/Kids
+  const realTypes=DATA.length?[...new Set(DATA.map(d=>d.type))].filter(t=>t&&t!=='Unknown').sort():TYPES;
+  const stEl=document.getElementById('simType');
+  if(stEl) stEl.innerHTML=realTypes.map(t=>`<option>${t}</option>`).join('');
 }
 function simulate(){
   const sid=document.getElementById('simStore').value,brand=document.getElementById('simBrand').value,type=document.getElementById('simType').value;
@@ -1072,11 +1178,23 @@ function simulate(){
   document.getElementById('simSliderVal').textContent=units;
   if(!sid||!brand){document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">New fill rate</div></div>`;return;}
   const d=DATA.find(x=>x.storeId===sid&&x.brand===brand&&x.type===type);
-  if(!d) return;
+  if(!d){document.getElementById('simResult').innerHTML=`<div class="sim-card" style="grid-column:1/-1;text-align:center;padding:14px"><div class="sim-lbl" style="color:var(--muted)">No matching SKU found for ${brand} · ${type} at this store</div></div>`;return;}
   const after=d.storeQty+units,newFill=d.cap>0?Math.min(100,Math.round(after/d.cap*100)):0,oldFill=d.cap>0?Math.round(d.storeQty/d.cap*100):0;
   const fc=newFill<30?'#E24B4A':newFill<60?'#EF9F27':newFill<90?'#3B6D11':'#185FA5';
   const whl=d.whQty-units;
-  document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val">${S.vm==='dollars'?'$'+(d.storeQty*d.cost).toLocaleString():d.storeQty}</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${S.vm==='dollars'?'$'+(after*d.cost).toLocaleString():after}</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${newFill}%</div><div class="sim-lbl">Fill rate (was ${oldFill}%)</div></div><div class="sim-card"><div class="sim-val" style="color:${whl<0?'#E24B4A':'inherit'}">${whl<0?'Short '+Math.abs(whl):whl+' left'}</div><div class="sim-lbl">WH after</div></div><div class="sim-card"><div class="sim-val">${d.velocity90}</div><div class="sim-lbl">90d velocity</div></div><div class="sim-card"><div class="sim-val">${d.cap}</div><div class="sim-lbl">Max capacity</div></div>`;
+  // Days of stock calculations
+  const dailyVel=d.velocity90/90;
+  const dosBefore=dailyVel>0?Math.round(d.storeQty/dailyVel):999;
+  const dosAfter=dailyVel>0?Math.round(after/dailyVel):999;
+  const dosDelta=dosAfter-dosBefore;
+  const dosColor=dosAfter<=14?'#E24B4A':dosAfter<=30?'#EF9F27':dosAfter<=60?'#3B6D11':'#185FA5';
+  // Impact on other stores: WH pool after transfer, potential fill for other stores needing this SKU
+  const otherStores=DATA.filter(x=>x.storeId!==sid&&x.brand===brand&&x.type===type&&x.cap>0);
+  const starved=otherStores.filter(x=>x.storeQty<x.cap*0.3).length;
+  const whRemainPct=d.whQty>0?Math.round((whl/d.whQty)*100):0;
+  const dosLabel=v=>v===999?'∞':v+'d';
+  const deltaLabel=dosDelta>=0?'+'+dosDelta+'d':dosDelta+'d';
+  document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val">${S.vm==='dollars'?'$'+(d.storeQty*d.cost).toLocaleString():d.storeQty}</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${S.vm==='dollars'?'$'+(after*d.cost).toLocaleString():after}</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${newFill}%</div><div class="sim-lbl">Fill rate (was ${oldFill}%)</div></div><div class="sim-card"><div class="sim-val" style="color:${dosColor}">${dosLabel(dosAfter)}</div><div class="sim-lbl">Days of stock (${deltaLabel} vs ${dosLabel(dosBefore)})</div></div><div class="sim-card"><div class="sim-val" style="color:${whl<0?'#E24B4A':'inherit'}">${whl<0?'Short '+Math.abs(whl):whl}</div><div class="sim-lbl">WH after (${whRemainPct}% remaining)</div></div><div class="sim-card"><div class="sim-val" style="color:${starved>0?'#EF9F27':'inherit'}">${starved}</div><div class="sim-lbl">Other stores critical (&lt;30%)</div></div><div class="sim-card"><div class="sim-val">${d.velocity90}</div><div class="sim-lbl">90d velocity</div></div><div class="sim-card"><div class="sim-val">${d.cap}</div><div class="sim-lbl">Max capacity</div></div>`;
 }
 
 // Inventory
