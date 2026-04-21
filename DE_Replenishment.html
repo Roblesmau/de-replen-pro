@@ -1203,24 +1203,43 @@ function simulate(){
   const units=parseInt(document.getElementById('simSlider').value)||0;
   document.getElementById('simSliderVal').textContent=units;
   if(!sid||!brand){document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">New fill rate</div></div>`;return;}
-  const d=DATA.find(x=>x.storeId===sid&&x.brand===brand&&x.type===type);
-  if(!d){document.getElementById('simResult').innerHTML=`<div class="sim-card" style="grid-column:1/-1;text-align:center;padding:14px"><div class="sim-lbl" style="color:var(--muted)">No matching SKU found for ${brand} · ${type} at this store</div></div>`;return;}
-  const after=d.storeQty+units,newFill=d.cap>0?Math.min(100,Math.round(after/d.cap*100)):0,oldFill=d.cap>0?Math.round(d.storeQty/d.cap*100):0;
+  // Aggregate ALL SKU rows for this store+brand+type (not just the first one)
+  const rows=DATA.filter(x=>x.storeId===sid&&x.brand===brand&&x.type===type);
+  if(!rows.length){document.getElementById('simResult').innerHTML=`<div class="sim-card" style="grid-column:1/-1;text-align:center;padding:14px"><div class="sim-lbl" style="color:var(--muted)">No data found for ${brand} · ${type} at this store</div></div>`;return;}
+  // Dedup capacity by (store,brand,type) — just 1 combo here so cap = first row's cap value
+  const storeQty=rows.reduce((a,r)=>a+r.storeQty,0);
+  const vel90=rows.reduce((a,r)=>a+r.velocity90,0);
+  const cap=rows.reduce((a,r)=>a+r.cap,0);
+  const storeVal=rows.reduce((a,r)=>a+r.storeQty*(r.cost||0),0);
+  // WH qty: dedup by sku so same WH item isn't counted once per store
+  const whSkuSeen=new Set();
+  const whQty=rows.reduce((a,r)=>{const k=r.sku||(r.brand+'|'+r.type);if(!whSkuSeen.has(k)){whSkuSeen.add(k);return a+(r.whQty||0);}return a;},0);
+  const after=storeQty+units;
+  const newFill=cap>0?Math.min(100,Math.round(after/cap*100)):0;
+  const oldFill=cap>0?Math.round(storeQty/cap*100):0;
   const fc=newFill<30?'#E24B4A':newFill<60?'#EF9F27':newFill<90?'#3B6D11':'#185FA5';
-  const whl=d.whQty-units;
-  // Days of stock calculations
-  const dailyVel=d.velocity90/90;
-  const dosBefore=dailyVel>0?Math.round(d.storeQty/dailyVel):999;
+  const whl=whQty-units;
+  // Days of stock (based on aggregated velocity)
+  const dailyVel=vel90/90;
+  const dosBefore=dailyVel>0?Math.round(storeQty/dailyVel):999;
   const dosAfter=dailyVel>0?Math.round(after/dailyVel):999;
   const dosDelta=dosAfter-dosBefore;
   const dosColor=dosAfter<=14?'#E24B4A':dosAfter<=30?'#EF9F27':dosAfter<=60?'#3B6D11':'#185FA5';
-  // Impact on other stores: WH pool after transfer, potential fill for other stores needing this SKU
-  const otherStores=DATA.filter(x=>x.storeId!==sid&&x.brand===brand&&x.type===type&&x.cap>0);
-  const starved=otherStores.filter(x=>x.storeQty<x.cap*0.3).length;
-  const whRemainPct=d.whQty>0?Math.round((whl/d.whQty)*100):0;
+  // Impact on other stores: count distinct stores with <30% fill for this brand+type
+  const otherByStore={};
+  const otherCapSeen=new Set();
+  DATA.filter(x=>x.storeId!==sid&&x.brand===brand&&x.type===type).forEach(x=>{
+    if(!otherByStore[x.storeId]) otherByStore[x.storeId]={qty:0,cap:0};
+    otherByStore[x.storeId].qty+=x.storeQty;
+    const ck=x.storeId+'|'+x.brand+'|'+x.type;
+    if(!otherCapSeen.has(ck)){otherByStore[x.storeId].cap+=x.cap;otherCapSeen.add(ck);}
+  });
+  const starved=Object.values(otherByStore).filter(s=>s.cap>0&&s.qty/s.cap<0.3).length;
+  const whRemainPct=whQty>0?Math.round((whl/whQty)*100):0;
   const dosLabel=v=>v===999?'∞':v+'d';
   const deltaLabel=dosDelta>=0?'+'+dosDelta+'d':dosDelta+'d';
-  document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val">${S.vm==='dollars'?'$'+(d.storeQty*d.cost).toLocaleString():d.storeQty}</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${S.vm==='dollars'?'$'+(after*d.cost).toLocaleString():after}</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${newFill}%</div><div class="sim-lbl">Fill rate (was ${oldFill}%)</div></div><div class="sim-card"><div class="sim-val" style="color:${dosColor}">${dosLabel(dosAfter)}</div><div class="sim-lbl">Days of stock (${deltaLabel} vs ${dosLabel(dosBefore)})</div></div><div class="sim-card"><div class="sim-val" style="color:${whl<0?'#E24B4A':'inherit'}">${whl<0?'Short '+Math.abs(whl):whl}</div><div class="sim-lbl">WH after (${whRemainPct}% remaining)</div></div><div class="sim-card"><div class="sim-val" style="color:${starved>0?'#EF9F27':'inherit'}">${starved}</div><div class="sim-lbl">Other stores critical (&lt;30%)</div></div><div class="sim-card"><div class="sim-val">${d.velocity90}</div><div class="sim-lbl">90d velocity</div></div><div class="sim-card"><div class="sim-val">${d.cap}</div><div class="sim-lbl">Max capacity</div></div>`;
+  const afterVal=(storeVal/Math.max(storeQty,1))*after;
+  document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val">${S.vm==='dollars'?'$'+Math.round(storeVal).toLocaleString():storeQty.toLocaleString()}</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${S.vm==='dollars'?'$'+Math.round(afterVal).toLocaleString():after.toLocaleString()}</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${newFill}%</div><div class="sim-lbl">Fill rate (was ${oldFill}%)</div></div><div class="sim-card"><div class="sim-val" style="color:${dosColor}">${dosLabel(dosAfter)}</div><div class="sim-lbl">Days of stock (${deltaLabel} vs ${dosLabel(dosBefore)})</div></div><div class="sim-card"><div class="sim-val" style="color:${whl<0?'#E24B4A':'inherit'}">${whl<0?'Short '+Math.abs(whl):whl.toLocaleString()}</div><div class="sim-lbl">WH after (${whRemainPct}% remaining)</div></div><div class="sim-card"><div class="sim-val" style="color:${starved>0?'#EF9F27':'inherit'}">${starved}</div><div class="sim-lbl">Other stores critical (&lt;30%)</div></div><div class="sim-card"><div class="sim-val">${vel90.toLocaleString()}</div><div class="sim-lbl">90d velocity</div></div><div class="sim-card"><div class="sim-val">${cap.toLocaleString()}</div><div class="sim-lbl">Max capacity</div></div>`;
 }
 
 // Inventory
