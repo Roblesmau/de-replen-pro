@@ -302,13 +302,11 @@
 <!-- DASHBOARD -->
 <div class="panel" id="panel-dashboard">
   <div class="filter-row">
-    <select id="dfStore" onchange="updateDash();syncDashToInv()"><option value="">All stores</option></select>
-    <select id="dfBrand" onchange="updateDash();syncDashToInv()"><option value="">All brands</option></select>
-    <select id="dfType"  onchange="updateDash();syncDashToInv()"><option value="">All types</option></select>
+    <span style="font-size:11px;color:var(--muted)">Filters controlled in Inventory tab</span>
     <div style="margin-left:auto">
       <div class="toggle-group">
-        <button class="topt active" id="tUnits"  onclick="setVM('units')">Units</button>
-        <button class="topt"        id="tDollar" onclick="setVM('dollars')">$ Value</button>
+        <button class="topt active" id="tUnits" onclick="setVM('units')">Units</button>
+        <button class="topt" id="tDollar" onclick="setVM('dollars')">$ Value</button>
       </div>
     </div>
   </div>
@@ -345,19 +343,14 @@
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Send-units simulator <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px">Preview the impact of a WH→store transfer before committing</span></div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">Pick a store + brand + type, slide the unit count. See the resulting fill rate, days of stock, remaining WH pool, and how many other stores would still be critical. Use this to decide whether to proceed with a transfer, hold stock for another store, or split the allocation.</div>
-    <div class="row row3" style="margin-bottom:10px">
-      <div class="field"><label>Store</label><select id="simStore" onchange="simulate()"><option value="">Select...</option></select></div>
-      <div class="field"><label>Brand</label><select id="simBrand" onchange="simulate()"><option value="">Select...</option></select></div>
-      <div class="field"><label>Type</label><select id="simType" onchange="simulate()"><option>Sunglasses</option><option>Optical</option><option>Kids</option></select></div>
+    <div class="card-title">Send-units simulator <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px">Uses selected Inventory filters</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">Set Inventory filters (brand + type + store), enter units to send from WH, click Simulate. See resulting fill rate, days of stock, remaining WH pool, and how many other stores stay critical.</div>
+    <div id="simFilterDisplay" style="padding:9px 13px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border);margin-bottom:10px;font-size:11px">Awaiting Inventory filter selection...</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <input type="number" id="simUnitsInput" min="0" max="999999" value="0" style="width:80px;padding:6px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px" placeholder="Units">
+      <button class="btn btn-secondary btn-sm" onclick="simulate()" style="align-self:center">&#9654; Simulate</button>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;padding:9px 13px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)">
-      <span style="font-size:11px;color:var(--muted);min-width:95px">Units to send</span>
-      <input type="range" id="simSlider" min="0" max="30" value="5" step="1" style="flex:1;padding:0" oninput="simulate()">
-      <span style="font-size:13px;font-weight:600;min-width:28px;text-align:right" id="simSliderVal">5</span>
-    </div>
-    <div class="sim-grid" id="simResult">
+    <div class="sim-grid" id="simResult" style="margin-top:14px">
       <div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">Current qty</div></div>
       <div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">After transfer</div></div>
       <div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">New fill rate</div></div>
@@ -367,13 +360,31 @@
 
 <!-- INVENTORY -->
 <div class="panel" id="panel-inventory">
-  <div class="filter-row" style="margin-bottom:10px">
-    <select id="invStoreFilter" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="width:auto;min-width:160px;height:72px"></select>
-    <select id="invBrandFilter" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="width:auto;min-width:140px;height:72px"></select>
-    <select id="invTypeFilter" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="width:auto;min-width:130px;height:72px"></select>
-    <select id="invForecastModel" onchange="renderInv()" title="Forecast model" style="align-self:center;height:28px;font-size:12px;padding:0 6px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--card);color:var(--text)"><option value="trend">Trend</option><option value="wma">WMA</option><option value="seasonal">Seasonal</option><option value="exp">EXP</option></select>
-    <button class="btn btn-secondary btn-sm" onclick="resetInvFilters()" style="align-self:center">☑ Select All</button>
-    <span id="invCount" style="font-size:11px;color:var(--muted);align-self:center"></span>
+  <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Stores</label>
+      <select id="invStoreFilter" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="width:auto;min-width:180px;height:100px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Brands</label>
+      <select id="invBrandFilter" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="width:auto;min-width:160px;height:100px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Types</label>
+      <select id="invTypeFilter" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="width:auto;min-width:150px;height:100px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
+      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Model</label>
+      <select id="invForecastModel" onchange="renderInv()" title="Forecast model" style="height:36px;padding:6px 8px;font-size:12px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--card);color:var(--text)"><option value="trend">Trend</option><option value="wma">WMA</option><option value="seasonal">Seasonal</option><option value="exp">EXP</option></select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
+      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Actions</label>
+      <button class="btn btn-secondary btn-sm" onclick="resetInvFilters()" style="white-space:nowrap">☑ Select All</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
+      <span style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">&nbsp;</span>
+      <span id="invCount" style="font-size:12px;color:var(--hint);font-weight:500;white-space:nowrap"></span>
+    </div>
   </div>
   <div class="card">
     <div class="card-title">Store totals — on hand by store</div>
@@ -1004,33 +1015,22 @@ function fmt(v){return S.vm==='dollars'?'$'+Math.round(v).toLocaleString():Math.
 
 // Dashboard
 function populateDashFilters(){
-  const fill=(id,arr,pre)=>{const cur=document.getElementById(id).value;document.getElementById(id).innerHTML=`<option value="">${pre}</option>`+arr.map(v=>`<option${cur===v?' selected':''}>${v}</option>`).join('');};
-  fill('dfStore',STORES.map(s=>`${s.id} — ${s.short}`),'All stores');
-  fill('dfBrand',BRANDS,'All brands');
-  fill('dfType',TYPES,'All types');
+  // Dashboard filters removed — all filtering now in Inventory tab
 }
 function getFD(){
-  // Dashboard inherits filters from Inventory tab (multi-select)
+  // Dashboard inherits filters from Inventory tab only
   const invStores=getFilterValues('invStoreFilter');
   const invBrands=getFilterValues('invBrandFilter');
   const invTypes=getFilterValues('invTypeFilter');
-  // Fallback to Dashboard single-select if Inventory filters not initialized
-  const s=document.getElementById('dfStore')?.value||'';
-  const b=document.getElementById('dfBrand')?.value||'';
-  const t=document.getElementById('dfType')?.value||'';
   return DATA.filter(d=>
-    (invStores.length?invStores.includes(d.storeId):(!s||d.storeId===s.split(' ')[0]))&&
-    (invBrands.length?invBrands.includes(d.brand):(!b||d.brand===b))&&
-    (invTypes.length?invTypes.includes(d.type):(!t||d.type===t))
+    (invStores.length?invStores.includes(d.storeId):true)&&
+    (invBrands.length?invBrands.includes(d.brand):true)&&
+    (invTypes.length?invTypes.includes(d.type):true)
   );
 }
-// Return brands currently selected in Inventory filter, or all brands from DATA as fallback
+// Return brands currently selected in Inventory filter
 function getActiveBrands(){
-  const invBrands=getFilterValues('invBrandFilter');
-  if(invBrands.length) return invBrands;
-  const b=document.getElementById('dfBrand')?.value||'';
-  if(b) return [b];
-  return [];
+  return getFilterValues('invBrandFilter');
 }
 function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
 
@@ -1098,7 +1098,7 @@ function renderUnitsChart(fd){
   const active=getActiveBrands();
   const invTypes=getFilterValues('invTypeFilter');
   const invStores=getFilterValues('invStoreFilter');
-  const ft=document.getElementById('dfType')?.value||'';
+  const ft='';
   // Only show stores present in filter (or all if none selected)
   const activeStores=invStores.length?STORES.filter(s=>invStores.includes(s.id)):STORES;
   const labels=activeStores.map(s=>s.short);
@@ -1189,56 +1189,92 @@ function renderUnderstocked(fd){
 
 // Simulator
 function populateSimSelects(){
-  document.getElementById('simStore').innerHTML='<option value="">Select store...</option>'+STORES.map(s=>`<option value="${s.id}">${s.id} — ${s.short}</option>`).join('');
-  // Use brands from actual DATA (not hardcoded BRANDS) for accuracy
-  const realBrands=DATA.length?[...new Set(DATA.map(d=>d.brand))].filter(b=>b&&b!=='Unknown').sort():BRANDS;
-  document.getElementById('simBrand').innerHTML='<option value="">Select brand...</option>'+realBrands.map(b=>`<option>${b}</option>`).join('');
-  // Populate real types dynamically instead of hardcoded Sunglasses/Optical/Kids
-  const realTypes=DATA.length?[...new Set(DATA.map(d=>d.type))].filter(t=>t&&t!=='Unknown').sort():TYPES;
-  const stEl=document.getElementById('simType');
-  if(stEl) stEl.innerHTML=realTypes.map(t=>`<option>${t}</option>`).join('');
+  // Simulator — inherits filters from Inventory tab
 }
 function simulate(){
-  const sid=document.getElementById('simStore').value,brand=document.getElementById('simBrand').value,type=document.getElementById('simType').value;
-  const units=parseInt(document.getElementById('simSlider').value)||0;
-  document.getElementById('simSliderVal').textContent=units;
-  if(!sid||!brand){document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:var(--hint)">—</div><div class="sim-lbl">New fill rate</div></div>`;return;}
-  // Aggregate ALL SKU rows for this store+brand+type (not just the first one)
-  const rows=DATA.filter(x=>x.storeId===sid&&x.brand===brand&&x.type===type);
-  if(!rows.length){document.getElementById('simResult').innerHTML=`<div class="sim-card" style="grid-column:1/-1;text-align:center;padding:14px"><div class="sim-lbl" style="color:var(--muted)">No data found for ${brand} · ${type} at this store</div></div>`;return;}
-  // Dedup capacity by (store,brand,type) — just 1 combo here so cap = first row's cap value
+  // Read filters from Inventory tab
+  const storeVals=getFilterValues('invStoreFilter');
+  const brandVals=getFilterValues('invBrandFilter');
+  const typeVals=getFilterValues('invTypeFilter');
+
+  // Validate: need at least one of each filter
+  if(!storeVals.length||!brandVals.length||!typeVals.length){
+    document.getElementById('simFilterDisplay').textContent='Select store, brand, and type in Inventory filters above';
+    document.getElementById('simResult').innerHTML=`<div class="sim-card" style="grid-column:1/-1;text-align:center;padding:14px"><div class="sim-lbl" style="color:var(--muted)">Incomplete — select store, brand, and type in Inventory filters</div></div>`;
+    return;
+  }
+
+  // Update filter display
+  const storeNames=storeVals.map(id=>STORES.find(s=>s.id===id)?.short||id).join(' + ');
+  document.getElementById('simFilterDisplay').textContent=`${storeNames} | ${brandVals.join(' + ')} | ${typeVals.join(' + ')}`;
+
+  // Get units from input, clamp to non-negative
+  let units=parseInt(document.getElementById('simUnitsInput').value)||0;
+  if(units<0) units=0;
+
+  // Filter DATA rows matching selected stores, brands, types
+  const rows=DATA.filter(d=>storeVals.includes(d.storeId)&&brandVals.includes(d.brand)&&typeVals.includes(d.type));
+  if(!rows.length){
+    document.getElementById('simResult').innerHTML=`<div class="sim-card" style="grid-column:1/-1;text-align:center;padding:14px"><div class="sim-lbl" style="color:var(--muted)">No data for selected filters</div></div>`;
+    return;
+  }
+
+  // Aggregate quantities
   const storeQty=rows.reduce((a,r)=>a+r.storeQty,0);
   const vel90=rows.reduce((a,r)=>a+r.velocity90,0);
-  const cap=rows.reduce((a,r)=>a+r.cap,0);
   const storeVal=rows.reduce((a,r)=>a+r.storeQty*(r.cost||0),0);
-  // WH qty: dedup by sku so same WH item isn't counted once per store
+
+  // Capacity: use S.CAP[storeId][brand][type], dedup by (storeId,brand,type)
+  let cap=0;
+  const capSeen=new Set();
+  rows.forEach(r=>{
+    const ck=r.storeId+'|'+r.brand+'|'+r.type;
+    if(!capSeen.has(ck)){cap+=(S.CAP[r.storeId]?.[r.brand]?.[r.type]||0);capSeen.add(ck);}
+  });
+
+  // WH qty: dedup by sku so same item isn't counted multiple times
   const whSkuSeen=new Set();
-  const whQty=rows.reduce((a,r)=>{const k=r.sku||(r.brand+'|'+r.type);if(!whSkuSeen.has(k)){whSkuSeen.add(k);return a+(r.whQty||0);}return a;},0);
+  const whQty=rows.reduce((a,r)=>{
+    const k=r.sku||(r.brand+'|'+r.type);
+    if(!whSkuSeen.has(k)){whSkuSeen.add(k);return a+(r.whQty||0);}
+    return a;
+  },0);
+
+  // Validate units within WH qty
+  if(units>whQty){
+    document.getElementById('simResult').innerHTML=`<div class="sim-card" style="grid-column:1/-1;text-align:center;padding:14px"><div class="sim-lbl" style="color:#E24B4A">Units (${units}) exceed WH qty (${whQty})</div></div>`;
+    return;
+  }
+
+  // Fill rate calculations
   const after=storeQty+units;
   const newFill=cap>0?Math.min(100,Math.round(after/cap*100)):0;
   const oldFill=cap>0?Math.round(storeQty/cap*100):0;
   const fc=newFill<30?'#E24B4A':newFill<60?'#EF9F27':newFill<90?'#3B6D11':'#185FA5';
+
+  // Days of stock
   const whl=whQty-units;
-  // Days of stock (based on aggregated velocity)
   const dailyVel=vel90/90;
   const dosBefore=dailyVel>0?Math.round(storeQty/dailyVel):999;
   const dosAfter=dailyVel>0?Math.round(after/dailyVel):999;
   const dosDelta=dosAfter-dosBefore;
   const dosColor=dosAfter<=14?'#E24B4A':dosAfter<=30?'#EF9F27':dosAfter<=60?'#3B6D11':'#185FA5';
-  // Impact on other stores: count distinct stores with <30% fill for this brand+type
-  const otherByStore={};
+
+  // Other stores critical: count distinct stores with <30% fill for same brand+type
+  const otherStores={};
   const otherCapSeen=new Set();
-  DATA.filter(x=>x.storeId!==sid&&x.brand===brand&&x.type===type).forEach(x=>{
-    if(!otherByStore[x.storeId]) otherByStore[x.storeId]={qty:0,cap:0};
-    otherByStore[x.storeId].qty+=x.storeQty;
-    const ck=x.storeId+'|'+x.brand+'|'+x.type;
-    if(!otherCapSeen.has(ck)){otherByStore[x.storeId].cap+=x.cap;otherCapSeen.add(ck);}
+  DATA.filter(d=>!storeVals.includes(d.storeId)&&brandVals.includes(d.brand)&&typeVals.includes(d.type)).forEach(d=>{
+    if(!otherStores[d.storeId]) otherStores[d.storeId]={qty:0,cap:0};
+    otherStores[d.storeId].qty+=d.storeQty;
+    const ck=d.storeId+'|'+d.brand+'|'+d.type;
+    if(!otherCapSeen.has(ck)){otherStores[d.storeId].cap+=(S.CAP[d.storeId]?.[d.brand]?.[d.type]||0);otherCapSeen.add(ck);}
   });
-  const starved=Object.values(otherByStore).filter(s=>s.cap>0&&s.qty/s.cap<0.3).length;
+  const starved=Object.values(otherStores).filter(s=>s.cap>0&&s.qty/s.cap<0.3).length;
   const whRemainPct=whQty>0?Math.round((whl/whQty)*100):0;
   const dosLabel=v=>v===999?'∞':v+'d';
   const deltaLabel=dosDelta>=0?'+'+dosDelta+'d':dosDelta+'d';
   const afterVal=(storeVal/Math.max(storeQty,1))*after;
+
   document.getElementById('simResult').innerHTML=`<div class="sim-card"><div class="sim-val">${S.vm==='dollars'?'$'+Math.round(storeVal).toLocaleString():storeQty.toLocaleString()}</div><div class="sim-lbl">Current qty</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${S.vm==='dollars'?'$'+Math.round(afterVal).toLocaleString():after.toLocaleString()}</div><div class="sim-lbl">After transfer</div></div><div class="sim-card"><div class="sim-val" style="color:${fc}">${newFill}%</div><div class="sim-lbl">Fill rate (was ${oldFill}%)</div></div><div class="sim-card"><div class="sim-val" style="color:${dosColor}">${dosLabel(dosAfter)}</div><div class="sim-lbl">Days of stock (${deltaLabel} vs ${dosLabel(dosBefore)})</div></div><div class="sim-card"><div class="sim-val" style="color:${whl<0?'#E24B4A':'inherit'}">${whl<0?'Short '+Math.abs(whl):whl.toLocaleString()}</div><div class="sim-lbl">WH after (${whRemainPct}% remaining)</div></div><div class="sim-card"><div class="sim-val" style="color:${starved>0?'#EF9F27':'inherit'}">${starved}</div><div class="sim-lbl">Other stores critical (&lt;30%)</div></div><div class="sim-card"><div class="sim-val">${vel90.toLocaleString()}</div><div class="sim-lbl">90d velocity</div></div><div class="sim-card"><div class="sim-val">${cap.toLocaleString()}</div><div class="sim-lbl">Max capacity</div></div>`;
 }
 
@@ -1415,33 +1451,7 @@ function getFilterValues(id){
   if(!el) return[];
   return[...el.selectedOptions].map(o=>o.value).filter(v=>v!=='__all__');
 }
-let _filterSyncing=false;
-function syncInvToDash(){
-  if(_filterSyncing) return;_filterSyncing=true;
-  const brands=getFilterValues('invBrandFilter');
-  const types=getFilterValues('invTypeFilter');
-  const stores=getFilterValues('invStoreFilter');
-  const dfb=document.getElementById('dfBrand');if(dfb) dfb.value=brands.length===1?brands[0]:'';
-  const dft=document.getElementById('dfType');if(dft) dft.value=types.length===1?types[0]:'';
-  const dfs=document.getElementById('dfStore');
-  if(dfs){const st=stores.length===1?STORES.find(s=>s.id===stores[0]):null;dfs.value=st?st.id+' — '+st.short:'';}
-  if(typeof updateDash==='function') updateDash();
-  _filterSyncing=false;
-}
-function syncDashToInv(){
-  if(_filterSyncing) return;_filterSyncing=true;
-  const b=document.getElementById('dfBrand')?.value||'';
-  const t=document.getElementById('dfType')?.value||'';
-  const s=(document.getElementById('dfStore')?.value||'').split(' ')[0];
-  const bfEl=document.getElementById('invBrandFilter');
-  if(bfEl){[...bfEl.options].filter(o=>o.value!=='__all__').forEach(o=>o.selected=!b||o.value===b);saveInvBrandFilter();}
-  const tfEl=document.getElementById('invTypeFilter');
-  if(tfEl){[...tfEl.options].filter(o=>o.value!=='__all__').forEach(o=>o.selected=!t||o.value===t);saveInvTypeFilter();}
-  const sfEl=document.getElementById('invStoreFilter');
-  if(sfEl){[...sfEl.options].filter(o=>o.value!=='__all__').forEach(o=>o.selected=!s||o.value===s);saveInvStoreFilter();}
-  if(DATA.length) renderInv();
-  _filterSyncing=false;
-}
+// Sync functions removed — filtering now one-way from Inventory to Dashboard
 function handleInvFilter(id,saveFn){
   const el=document.getElementById(id);if(!el) return;
   const hasAll=[...el.selectedOptions].some(o=>o.value==='__all__');
@@ -1453,7 +1463,7 @@ function handleInvFilter(id,saveFn){
   }
   if(saveFn) saveFn();
   renderInv();
-  syncInvToDash();
+  updateDash();
 }
 function resetInvFilters(){
   ['invStoreFilter','invBrandFilter','invTypeFilter'].forEach(id=>{
@@ -1461,9 +1471,6 @@ function resetInvFilters(){
     if(el)[...el.options].forEach(o=>o.selected=o.value!=='__all__');
   });
   saveInvStoreFilter();saveInvBrandFilter();saveInvTypeFilter();
-  const dfb=document.getElementById('dfBrand');if(dfb) dfb.value='';
-  const dft=document.getElementById('dfType');if(dft) dft.value='';
-  const dfs=document.getElementById('dfStore');if(dfs) dfs.value='';
   if(typeof updateDash==='function') updateDash();
   renderInv();
 }
