@@ -301,8 +301,47 @@ locs.filter(l => l.active
 - Orders 90d badge: blue · Orders Prior Year badge: amber
 - Appears BEFORE "Data Loaded from Shopify" card
 
-### Inventory Tab
+### Filter Architecture — CENTRALIZED (as of commit 2302c55, Apr 24 2026)
+**ALL filtering is driven exclusively from the Inventory tab.** No filter controls exist on Dashboard or Simulator.
+
+- **Inventory tab** owns: `invStoreFilter` (multi-select), `invBrandFilter` (multi-select), `invTypeFilter` (multi-select), forecast model selector
+- **Dashboard tab** shows only: hint text `"Filters controlled in Inventory tab"` + Units/$ toggle. NO dfStore/dfBrand/dfType elements exist.
+- **Simulator tab** reads directly from Inventory filters via `getFilterValues('invStoreFilter')` etc.
+- `getFD()` reads only from `invStoreFilter` / `invBrandFilter` / `invTypeFilter`
+- `getActiveBrands()` reads only from `invBrandFilter`
+
+**REMOVED functions** (do not re-add):
+- `populateDashFilters()` — was syncing Dashboard dropdowns from Inventory
+- `populateSimSelects()` — was populating Simulator dropdowns
+- `syncInvToDash()` / `syncDashToInv()` — were keeping Dashboard ↔ Inventory in sync
+
+### Inventory Tab Filter Layout (current)
+Labeled column sections in a flex row, `align-items:flex-start`, `gap:14px`:
+```
+[STORES]  [BRANDS]  [TYPES]  [MODEL]  [ACTIONS]  [COUNT]
+ multi-    multi-    multi-   forecast  Select      N combos
+ select    select    select   dropdown  All btn     shown
+ 100px h   100px h   100px h            (resets
+ 8px pad   8px pad   8px pad             to all)
+```
+Each column: `flex-direction:column`, label is `font-size:11px, uppercase, letter-spacing:0.5px, color:var(--muted)`
+
+### Inventory Tab Table
 Brand x Type grouped: `Brand | Type | On Hand | 90d Sales | Capacity | Fill% | [per-store cols]`
+
+### Simulator Tab (current — commit 2302c55)
+- Title card: `"Send-units simulator"` + badge `"Uses selected Inventory filters"`
+- `simFilterDisplay` div: shows active filter summary text (store names | brands | types) — updated on Simulate click
+- Number input `simUnitsInput` (min=0, max=999999) + `▶ Simulate` button calling `simulate()`
+- `simResult` div: 8-card result grid rendered after simulate()
+- NO filter dropdowns, NO slider
+
+**simulate() logic:**
+1. Reads `invStoreFilter` / `invBrandFilter` / `invTypeFilter` — errors if any are empty
+2. Capacity: sums `S.CAP[storeId][brand][type]` with Set dedup on `storeId|brand|type`
+3. WH qty: deduped by SKU (`r.sku || r.brand+'|'+r.type`) across all matching rows
+4. Other stores critical: counts **distinct storeIds** (not row count) with fill < 30%
+5. Units input validated: must be ≤ available WH qty
 
 ---
 
@@ -384,7 +423,7 @@ S = {
 
 ## Before Every File Delivery — Checklist
 - [ ] No duplicate function definitions
-- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadInspectorXLSX`
+- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`
 - [ ] File size 155–185 KB — sudden drop = truncation
 - [ ] `<div class="app">` count = 1
 - [ ] No `since_id` in orders URLs
@@ -402,6 +441,10 @@ S = {
 - [ ] btnWH uses pointer-events not disabled attr
 - [ ] btnTest turns green on step 1 ok
 - [ ] btn2B turns green on step 2b ok
+- [ ] Dashboard tab has NO `dfStore` / `dfBrand` / `dfType` elements — only hint text + Units/$ toggle
+- [ ] Simulator has NO `simStore` / `simBrand` / `simType` dropdowns / slider — only `simFilterDisplay`, `simUnitsInput`, Simulate button
+- [ ] `getFD()` reads only `invStoreFilter` / `invBrandFilter` / `invTypeFilter` — no Dashboard fallback
+- [ ] `populateDashFilters`, `populateSimSelects`, `syncInvToDash`, `syncDashToInv` are ABSENT
 
 ---
 
@@ -421,6 +464,11 @@ S = {
 | WH 1% match rate | Matching against DATA (stocked only) | Match against itemMap (full catalog) |
 | Capacity phantom rows | Using BRANDS × TYPES instead of catalogCombos | Drive from itemMap catalogCombos |
 | R006/R009/R014 show 0 inventory | Was: `inventory_item_id_gt` cycling. Fixed by batch-by-ID | Confirmed fixed — all stores now show real counts |
+| Dashboard filters out of sync with Inventory | Separate dfStore/dfBrand/dfType elements required sync functions | Removed Dashboard filters entirely — filtering centralized to Inventory tab |
+| Simulator using wrong filter values | simStore/simBrand/simType were independent DOM elements | Removed; simulate() now reads directly from invStoreFilter/invBrandFilter/invTypeFilter |
+| Capacity double-counting in simulator | Summing row.cap across all rows (one per SKU) | Use Set dedup on storeId\|brand\|type, read from S.CAP authoritatively |
+| `simulate()` errors on removed DOM elements | Old code still referenced simStore/simBrand/simSlider after HTML removal | Fully rewrote simulate() to use Inventory filters + text input |
+| `getFD()` references removed dfStore elements | Dashboard filter elements removed but getFD() still had fallback reads | Replaced with Inventory-only reads |
 
 ---
 
