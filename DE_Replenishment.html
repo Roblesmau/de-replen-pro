@@ -1928,22 +1928,29 @@ function renderCap(){
       TYPES.map(t=>`<option value="${t}"${curType===t?' selected':''}>${t}</option>`).join('');
   }
   const tf=document.getElementById('capFType').value,bf=document.getElementById('capFBrand').value;
+  // Inherit Inventory tab filters (Stores / Brands / Types) — snapshot at render time
+  const invStores=getFilterValues('invStoreFilter');
+  const invBrands=getFilterValues('invBrandFilter');
+  const invTypes=getFilterValues('invTypeFilter');
   // Build brand+type combos that actually exist in the catalog — no phantom rows
   const catalogCombos=new Set();
   Object.values(S.raw.itemMap||{}).forEach(v=>{
     if(v.brand&&v.brand!=='Unknown'&&v.type&&v.type!=='Unknown') catalogCombos.add(v.brand+'|||'+v.type);
   });
-  // Filter to selected brand/type
+  // Filter to selected brand/type (local capacity filters AND Inventory filters)
   let comboPairs=[...catalogCombos].map(k=>{const[b,t]=k.split('|||');return{b,t};})
     .filter(({b,t})=>(bf?b===bf:BRANDS.includes(b))&&(tf==='all'||t===tf))
+    .filter(({b,t})=>(!invBrands.length||invBrands.includes(b))&&(!invTypes.length||invTypes.includes(t)))
     .sort((a,b)=>a.b.localeCompare(b.b)||a.t.localeCompare(b.t));
-  let html=`<table class="cap-table"><thead><tr><th class="frozen">Brand / Type</th>${STORES.map(st=>`<th>${st.short}<br><span style="font-size:9px;opacity:.6">${st.id}</span></th>`).join('')}</tr></thead><tbody>`;
+  // Filter visible stores by Inventory store filter
+  const visibleStores=invStores.length?STORES.filter(st=>invStores.includes(st.id)):STORES;
+  let html=`<table class="cap-table"><thead><tr><th class="frozen">Brand / Type</th>${visibleStores.map(st=>`<th>${st.short}<br><span style="font-size:9px;opacity:.6">${st.id}</span></th>`).join('')}</tr></thead><tbody>`;
   let lastCapBrand='';
   comboPairs.forEach(({b,t})=>{
     const isFirst=b!==lastCapBrand,isNew=S.newBrands.has(b);
     lastCapBrand=b;
     html+=`<tr><td class="label-cell">${isFirst?`<span style="font-size:11px;font-weight:600;color:${isNew?'#6B21A8':'var(--text)'}">${b}${isNew?' <span style="font-size:9px;padding:1px 5px;border-radius:10px;background:#F3E8FF;color:#6B21A8">NEW</span>':''}</span><br>`:''}<span style="font-size:10px;color:var(--muted)">${t}</span></td>`;
-    STORES.forEach(st=>{
+    visibleStores.forEach(st=>{
       const carries=S.STORE_BRANDS[st.id]?.has(b);
       if(carries){const v=S.CAP[st.id]?.[b]?.[t]??0;const orig=S.ORIG[st.id]?.[b]?.[t];const cls=v!==orig?'cap-input changed':v===0?'cap-input zero':'cap-input';html+=`<td><input class="${cls}" type="number" min="0" max="999" value="${v}" data-store="${st.id}" data-brand="${b}" data-type="${t}" onchange="onCapChange(this)" onfocus="this.select()"></td>`;}
       else html+=`<td style="text-align:center"><button style="font-size:10px;padding:2px 7px;border:1px dashed var(--border2);border-radius:5px;background:none;color:var(--hint);cursor:pointer" onclick="addBrandToStore('${b}','${st.id}')">+</button></td>`;
@@ -1952,9 +1959,13 @@ function renderCap(){
   });
   html+='</tbody></table>';
   document.getElementById('capWrap').innerHTML=html;
+  // Total reflects visible (filtered) scope; changed count is global
   let total=0,changed=0;
-  STORES.forEach(st=>BRANDS.forEach(b=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;TYPES.forEach(t=>{total+=S.CAP[st.id]?.[b]?.[t]??0;if((S.CAP[st.id]?.[b]?.[t])!==S.ORIG[st.id]?.[b]?.[t]) changed++;});}));
-  document.getElementById('capSummary').innerHTML=`<span><strong>${STORES.length}</strong> stores</span><span><strong>${total.toLocaleString()}</strong> total units capacity</span>${changed?`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`:''}<span style="margin-left:auto"><button class="btn btn-green btn-sm" onclick="exportCapXLSX()">⬇ Export Excel</button></span>`;
+  visibleStores.forEach(st=>comboPairs.forEach(({b,t})=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;total+=S.CAP[st.id]?.[b]?.[t]??0;}));
+  STORES.forEach(st=>BRANDS.forEach(b=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;TYPES.forEach(t=>{if((S.CAP[st.id]?.[b]?.[t])!==S.ORIG[st.id]?.[b]?.[t]) changed++;});}));
+  const filterActive=invStores.length||invBrands.length||invTypes.length;
+  const scopeLbl=filterActive?`<span style="color:var(--accent)">Filtered: ${visibleStores.length}/${STORES.length} stores · ${comboPairs.length} combos</span>`:`<span><strong>${STORES.length}</strong> stores</span>`;
+  document.getElementById('capSummary').innerHTML=`${scopeLbl}<span><strong>${total.toLocaleString()}</strong> total units capacity${filterActive?' (filtered)':''}</span>${changed?`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`:''}<span style="margin-left:auto"><button class="btn btn-green btn-sm" onclick="exportCapXLSX()">⬇ Export Excel</button></span>`;
 }
 function onCapChange(input){
   const{store,brand,type}=input.dataset;const v=Math.max(0,parseInt(input.value)||0);S.CAP[store][brand][type]=v;
