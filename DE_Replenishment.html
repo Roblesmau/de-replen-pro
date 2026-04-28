@@ -363,15 +363,15 @@
   <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-start">
     <div style="display:flex;flex-direction:column;gap:6px">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Stores</label>
-      <select id="invStoreFilter" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="width:auto;min-width:180px;height:100px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+      <select id="invStoreFilter" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="width:auto;min-width:180px;height:260px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Brands</label>
-      <select id="invBrandFilter" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="width:auto;min-width:160px;height:100px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+      <select id="invBrandFilter" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="width:auto;min-width:160px;height:260px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Types</label>
-      <select id="invTypeFilter" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="width:auto;min-width:150px;height:100px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+      <select id="invTypeFilter" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="width:auto;min-width:150px;height:260px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Model</label>
@@ -1965,17 +1965,18 @@ function renderCap(){
   STORES.forEach(st=>BRANDS.forEach(b=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;TYPES.forEach(t=>{if((S.CAP[st.id]?.[b]?.[t])!==S.ORIG[st.id]?.[b]?.[t]) changed++;});}));
   const filterActive=invStores.length||invBrands.length||invTypes.length;
   const scopeLbl=filterActive?`<span style="color:var(--accent)">Filtered: ${visibleStores.length}/${STORES.length} stores · ${comboPairs.length} combos</span>`:`<span><strong>${STORES.length}</strong> stores</span>`;
-  document.getElementById('capSummary').innerHTML=`${scopeLbl}<span><strong>${total.toLocaleString()}</strong> total units capacity${filterActive?' (filtered)':''}</span>${changed?`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`:''}<span style="margin-left:auto"><button class="btn btn-green btn-sm" onclick="exportCapXLSX()">⬇ Export Excel</button></span>`;
+  document.getElementById('capSummary').innerHTML=`${scopeLbl}<span><strong>${total.toLocaleString()}</strong> total units capacity${filterActive?' (filtered)':''}</span>${changed?`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`:''}`;
 }
 function onCapChange(input){
   const{store,brand,type}=input.dataset;const v=Math.max(0,parseInt(input.value)||0);S.CAP[store][brand][type]=v;
   const orig=S.ORIG[store]?.[brand]?.[type];input.className=v!==orig?'cap-input changed':v===0?'cap-input zero':'cap-input';
   S.capChanges++;document.getElementById('capBadge').style.display='inline-block';document.getElementById('capBadge').textContent=`${S.capChanges} change${S.capChanges>1?'s':''}`;
   applyCapToData();
+  saveCapToLocalStorage();
   if(DATA.length) renderInv();
 }
 function addBrandToStore(brand,storeId){if(!S.CAP[storeId][brand]) S.CAP[storeId][brand]={};TYPES.forEach(t=>{if(S.CAP[storeId][brand][t]===undefined) S.CAP[storeId][brand][t]=0;});S.STORE_BRANDS[storeId].add(brand);renderCap();}
-function resetCap(){if(!confirm('Reset all changes?')) return;STORES.forEach(st=>BRANDS.forEach(b=>TYPES.forEach(t=>{if(S.ORIG[st.id]?.[b]?.[t]!==undefined) S.CAP[st.id][b][t]=S.ORIG[st.id][b][t];})));S.newBrands.forEach(b=>{BRANDS=BRANDS.filter(x=>x!==b);STORES.forEach(st=>{delete S.CAP[st.id][b];S.STORE_BRANDS[st.id].delete(b);});});S.newBrands.clear();S.capChanges=0;document.getElementById('capBadge').style.display='none';applyCapToData();renderCap();populateCapBrandFilter();if(DATA.length) renderInv();}
+function resetCap(){if(!confirm('Reset all changes? This permanently clears saved capacity edits.')) return;STORES.forEach(st=>BRANDS.forEach(b=>TYPES.forEach(t=>{if(S.ORIG[st.id]?.[b]?.[t]!==undefined) S.CAP[st.id][b][t]=S.ORIG[st.id][b][t];})));S.newBrands.forEach(b=>{BRANDS=BRANDS.filter(x=>x!==b);STORES.forEach(st=>{delete S.CAP[st.id][b];S.STORE_BRANDS[st.id].delete(b);});});S.newBrands.clear();S.capChanges=0;document.getElementById('capBadge').style.display='none';try{localStorage.removeItem('de_capacity_v1');localStorage.removeItem('de_capacity_saved_at');}catch(e){}applyCapToData();renderCap();populateCapBrandFilter();if(DATA.length) renderInv();}
 function exportCapXLSX(){
   const wb=XLSX.utils.book_new();const rows=[['Store Code','Store Name','Brand','Type','Max Capacity']];
   STORES.forEach(st=>BRANDS.forEach(b=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;TYPES.forEach(t=>{rows.push([st.id,st.name,b,t,S.CAP[st.id]?.[b]?.[t]??0]);});}));
@@ -2716,6 +2717,9 @@ function processLiveData(locs,invLevels,orders){
     });
   });
   clog('  CAP: '+BRANDS.length+' brands × '+allTypes.length+' types × '+STORES.length+' stores');
+  // Overlay saved capacity edits from localStorage (preserves user changes across reloads)
+  loadCapFromLocalStorage();
+  applyCapToData();
   S.liveData={stores:[...STORES],data:[...DATA],brands:[...BRANDS],types:[...TYPES]};
   S.sel.clear();STORES.forEach(st=>S.sel.add(st.id));
   buildRecos();renderStoreGrid();populateSimSelects();
