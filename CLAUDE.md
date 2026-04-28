@@ -285,7 +285,9 @@ locs.filter(l => l.active
 ## UI Structure
 
 ### Tab Order (DO NOT CHANGE)
-`Live Connect -> Inventory -> Dashboard -> Capacity -> Store Selection`
+`Live Connect -> Inventory -> Dashboard -> Capacity -> Exceptions -> Store Selection`
+
+The Settings tab is hidden by default (`display:none` on the button) and only contains NAV export settings — all data-source/priority/replenishment-rules controls have been moved out.
 
 ### Live Connect Steps (Current)
 1. Test connection
@@ -314,6 +316,8 @@ locs.filter(l => l.active
 - `populateDashFilters()` — was syncing Dashboard dropdowns from Inventory
 - `populateSimSelects()` — was populating Simulator dropdowns
 - `syncInvToDash()` / `syncDashToInv()` — were keeping Dashboard ↔ Inventory in sync
+- `applySettings()` — old Settings-tab "Apply & recalculate" button; replaced by velocity tiers + auto-rebuild
+- `savePriority()` — old Settings-tab priority dropdown handler; Store Selection priority dropdown calls `syncPriority()` directly
 
 ### Inventory Tab Filter Layout (current)
 Labeled column sections in a flex row, `align-items:flex-start`, `gap:14px`:
@@ -321,10 +325,64 @@ Labeled column sections in a flex row, `align-items:flex-start`, `gap:14px`:
 [STORES]  [BRANDS]  [TYPES]  [MODEL]  [ACTIONS]  [COUNT]
  multi-    multi-    multi-   forecast  Select      N combos
  select    select    select   dropdown  All btn     shown
- 100px h   100px h   100px h            (resets
+ 260px h   260px h   260px h            (resets
  8px pad   8px pad   8px pad             to all)
 ```
 Each column: `flex-direction:column`, label is `font-size:11px, uppercase, letter-spacing:0.5px, color:var(--muted)`
+
+Inventory filter changes propagate to: Dashboard widgets (`updateDash`), Capacity tab (rendered on tab switch), Replenishment scope (`buildRecos` re-runs).
+
+### Capacity Tab (current)
+- **Top section:** Capacity matrix upload card (file input + "⬇ Download template (5 examples)" button) — moved here from Settings
+- **Toolbar:** `+ Add brand to stores` · `All types` · `All brands` · Import · Export & Save · Reset
+- **Table:** Brand/Type rows × Store columns (filtered to Inventory selection)
+- **Bottom summary:** scope label · total units · changed-cells count (no Export Excel button — top toolbar is sole action source)
+
+**Persistence:**
+- Auto-save to localStorage (`de_capacity_v1`) on every cell edit (`onCapChange`)
+- Restored in `processLiveData` after rebuild via `loadCapFromLocalStorage()` + `applyCapToData()`
+- Reset clears both in-memory `S.CAP` AND localStorage (true "start over")
+
+**Filter inheritance** (on tab switch only — not reactive):
+- Rows filtered to Inventory `invBrandFilter` × `invTypeFilter`
+- Per-store columns hidden for stores not in `invStoreFilter`
+- Edits while filtered still write to full `S.CAP` (filter is view-only)
+- Import/Export ignore the filter (operate on full dataset)
+
+### Exceptions Tab (current — between Capacity and Store Selection)
+Single card: "Exception list — SKUs to NEVER send to specific stores"
+- Upload `.xlsx` with columns `Store Code` · `Variant SKU` (numeric SKUs, written as text cells)
+- Buttons: Download template (5 examples) · Export current list · Clear list
+- Counter: `N exceptions loaded`
+- Stored in `S.exceptions` (Set of `storeId|sku` keys, normalized lowercase)
+- Persisted to `localStorage.de_exceptions_v1` as JSON array
+- Loaded on boot AND after every Shopify/cache load (`loadExcFromLocalStorage`)
+- Active in `buildRecos()` — `isExcepted(d.storeId, d.sku)` check skips matching pairs entirely (never enter `S.recos`, never consume warehouse units)
+
+### Store Selection Tab (current)
+**Toolbar:** Select all · Clear · `N/Y stores selected` · scope badges (`N stores · N brands (all) · N types (all)`) · Priority dropdown · ⚙ Send qty rules · Run replenishment · Export NAV
+
+**Velocity tier panel** (`⚙ Send qty rules` toggles `velTierPanel`):
+- Editable list of tiers `{minPerWeek, qty}`. Defaults: `[{0,1},{1,2},{3,3},{7,5}]` in `VEL_TIERS_DEFAULT`
+- "Allow over-capacity sends" checkbox (default OFF)
+- Replaces the old `defQty`/`hotQty` system. `getQtyForRow(d)` returns tier qty for `d.velocity90 / 12.857` (per-store per-SKU weekly velocity)
+
+**Priority order preview** (`priorityListWrap` below the store grid):
+- Numbered ordered list reflecting current priority mode (Urgency/Velocity/Manual)
+- Shows store rank · short name · location ID · % full pill · metric (DOS / 90d units / "Selected #N")
+- Refreshed on `renderStoreGrid()` and `syncPriority()`
+
+**Persistence:**
+- `de_store_sel_set` — selected store IDs
+- `de_store_sel_order` — selection sequence (for Manual priority)
+- `de_priority_mode` — `urgency` | `velocity` | `manual`
+- `de_vel_tiers` — JSON of tier array
+- `de_allow_overcap` — `'1'` or `'0'`
+- On reload, saved IDs are intersected with current STORES (silently skipped if a store no longer exists)
+
+**Replenishment scope filtering:**
+- `buildRecos()` reads `invBrandFilter` / `invTypeFilter` from Inventory tab — rows whose brand/type isn't selected are skipped (in addition to exception list)
+- `S.storeStats.pct` (powers store tile + priority list `% full`) also honors the same filter, with capacity dedup by `(brand, type)` Set
 
 ### Inventory Tab Table
 Brand x Type grouped: `Brand | Type | On Hand | 90d Sales | Capacity | Fill% | [per-store cols]`
@@ -423,8 +481,8 @@ S = {
 
 ## Before Every File Delivery — Checklist
 - [ ] No duplicate function definitions
-- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`
-- [ ] File size 155–185 KB — sudden drop = truncation
+- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `renderPriorityList`, `renderScopeBadges`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadCapTemplate`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`, `getQtyForRow`, `saveStoreSelection`, `loadStoreSelection`, `saveVelTiers`, `loadVelTiers`, `toggleVelTierPanel`, `renderVelTiers`, `parseExcFile`, `loadExcFromLocalStorage`, `saveExcToLocalStorage`, `isExcepted`, `downloadExcTemplate`, `exportExcList`, `clearExcList`
+- [ ] File size 200–230 KB after recent feature additions (Exceptions tab, velocity tiers, persistence) — sudden drop still indicates truncation
 - [ ] `<div class="app">` count = 1
 - [ ] No `since_id` in orders URLs
 - [ ] No `inventory_item_id_gt` anywhere
@@ -444,7 +502,19 @@ S = {
 - [ ] Dashboard tab has NO `dfStore` / `dfBrand` / `dfType` elements — only hint text + Units/$ toggle
 - [ ] Simulator has NO `simStore` / `simBrand` / `simType` dropdowns / slider — only `simFilterDisplay`, `simUnitsInput`, Simulate button
 - [ ] `getFD()` reads only `invStoreFilter` / `invBrandFilter` / `invTypeFilter` — no Dashboard fallback
-- [ ] `populateDashFilters`, `populateSimSelects`, `syncInvToDash`, `syncDashToInv` are ABSENT
+- [ ] `populateDashFilters`, `populateSimSelects`, `syncInvToDash`, `syncDashToInv`, `applySettings`, `savePriority` are ABSENT
+- [ ] Tab DOM order: `tab-connect`, `tab-inventory`, `tab-dashboard`, `tab-capacity`, `tab-exceptions`, `tab-stores` (Settings hidden)
+- [ ] `panel-exceptions` present with `excFile` upload + `excCount` + Download/Export/Clear buttons
+- [ ] `S.exceptions` is a `Set` (not array) initialized in S
+- [ ] `isExcepted(storeId, sku)` check at the TOP of the `DATA.forEach` in `buildRecos`
+- [ ] `velTierPanel` toggleable in Store Selection tab; `S.velTiers` defaulted from `VEL_TIERS_DEFAULT`
+- [ ] `priorityListWrap` rendered after store grid; `renderPriorityList()` called from `renderStoreGrid()` and `syncPriority()`
+- [ ] `scopeBadges` populated by `renderScopeBadges()` showing stores · brands · types counts
+- [ ] Capacity tab top section: capacity matrix upload card with `downloadCapTemplate` button
+- [ ] `loadCapFromLocalStorage()` + `applyCapToData()` called in `processLiveData` AFTER S.CAP rebuild
+- [ ] `loadVelTiers()` + `loadExcFromLocalStorage()` + `loadStoreSelection()` called in both boot path (after `buildSample`) and live-data path (in `processLiveData`)
+- [ ] Settings tab ONLY contains NAV export settings card (no Data source / Store priority / Replenishment rules / Capacity upload)
+- [ ] localStorage keys: `de_capacity_v1`, `de_capacity_saved_at`, `de_exceptions_v1`, `de_store_sel_set`, `de_store_sel_order`, `de_priority_mode`, `de_vel_tiers`, `de_allow_overcap`, plus existing `de_inv_*_filter`
 
 ---
 
@@ -469,6 +539,14 @@ S = {
 | Capacity double-counting in simulator | Summing row.cap across all rows (one per SKU) | Use Set dedup on storeId\|brand\|type, read from S.CAP authoritatively |
 | `simulate()` errors on removed DOM elements | Old code still referenced simStore/simBrand/simSlider after HTML removal | Fully rewrote simulate() to use Inventory filters + text input |
 | `getFD()` references removed dfStore elements | Dashboard filter elements removed but getFD() still had fallback reads | Replaced with Inventory-only reads |
+| Capacity edits lost on page reload | `processLiveData` was rebuilding `S.CAP` from defaults but never overlaying saved values | Call `loadCapFromLocalStorage()` + `applyCapToData()` after S.CAP rebuild |
+| Capacity not auto-saving | `onCapChange` only updated memory; localStorage write was gated to Export/Save button | Added `saveCapToLocalStorage()` to `onCapChange` |
+| Reset capacity values come back on reload | `resetCap()` only reset memory, never cleared localStorage | Reset now removes `de_capacity_v1` + `de_capacity_saved_at` |
+| `% full` in store priority list doesn't match selected filters | `S.storeStats.pct` summed all DATA rows + summed `b.cap` across SKU rows (inflated denominator) | Filter rows by `invBrands`/`invTypes`; dedup capacity by (brand,type) Set reading from `S.CAP` |
+| Replenishment ignores Inventory brand/type filters | `buildRecos` iterated all DATA without filter | Read `getFilterValues('invBrandFilter'/'invTypeFilter')` and skip non-matching rows at top of loop |
+| Exception list cleared on page reload | No persistence layer | `de_exceptions_v1` JSON array of `storeId\|sku` keys, loaded on boot + after `processLiveData` |
+| Variant SKU column reformatted by Excel (scientific notation) | Cells written as numbers, Excel auto-converts | Set cell `t='s'` and stringify value when writing template/export |
+| Settings tab still shows old Data source / Priority / Replenishment rules cards | Cards not removed during consolidation | Removed; functionality lives in Store Selection tab (priority dropdown, ⚙ Send qty rules); orphaned `applySettings`/`savePriority` deleted |
 
 ---
 

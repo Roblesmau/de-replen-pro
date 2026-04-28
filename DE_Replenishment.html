@@ -206,7 +206,6 @@
 <div class="topbar">
   <div class="logo">Designer Eyes <span>Replenishment</span><sub>v6.4</sub></div>
   <div class="topbar-right">
-    <span id="modeBadge" class="badge badge-sample">Sample Data</span>
     <button class="btn btn-secondary btn-sm" onclick="showTab('settings')">⚙ Settings</button>
   </div>
 </div>
@@ -217,6 +216,7 @@
   <button class="tab"        id="tab-inventory"       onclick="showTab('inventory')">Inventory</button>
   <button class="tab"        id="tab-dashboard"       onclick="showTab('dashboard')">Dashboard</button>
   <button class="tab"        id="tab-capacity"        onclick="showTab('capacity')">Capacity</button>
+  <button class="tab"        id="tab-exceptions"      onclick="showTab('exceptions')">Exceptions</button>
   <button class="tab"        id="tab-stores"          onclick="showTab('stores')">Store Selection</button>
   <button class="tab"        id="tab-recommendations" onclick="showTab('recommendations')" style="display:none">Recommendations</button>
   <button class="tab"        id="tab-nav"             onclick="showTab('nav')" style="display:none">NAV Preview</button>
@@ -226,6 +226,56 @@
 <div class="content">
 
 <!-- STORE SELECTION -->
+<!-- EXCEPTIONS -->
+<div class="panel" id="panel-exceptions">
+  <div class="card">
+    <div class="card-title">Exception list — SKUs to NEVER send to specific stores</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">
+      Any (Store Code · Variant SKU) pair on this list is excluded from replenishment recommendations. Stored in memory + localStorage.
+    </div>
+    <!-- Toolbar -->
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import from Excel">
+        ⬆ Import
+        <input type="file" id="excFile" accept=".xlsx,.xls,.csv" onchange="parseExcFile(this)" style="display:none">
+      </label>
+      <button class="btn btn-secondary btn-sm" onclick="downloadExcTemplate()" title="Download a 5-row template">⬇ Template</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportExcList()">⬇ Export current list</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearExcList()">↺ Clear list</button>
+      <span id="excCount" style="font-size:11px;color:var(--hint);margin-left:auto"></span>
+    </div>
+    <div id="excUpStatus" style="margin-bottom:10px"></div>
+
+    <!-- Add manually -->
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Store</label>
+        <select id="excAddStore" style="min-width:220px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Variant SKU</label>
+        <input type="text" id="excAddSku" placeholder="e.g. 313422" style="min-width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="addExcManual()">+ Add exception</button>
+    </div>
+
+    <!-- Visible list -->
+    <div id="excListWrap" style="overflow-x:auto;max-height:480px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead style="position:sticky;top:0;background:var(--card);z-index:1;border-bottom:1px solid var(--border)">
+          <tr>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Store Code</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Store Name</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Variant SKU</th>
+            <th style="text-align:right;padding:8px 12px"></th>
+          </tr>
+        </thead>
+        <tbody id="excListBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div class="panel" id="panel-stores">
 
   <!-- Store selector -->
@@ -236,6 +286,7 @@
         <button class="btn btn-secondary btn-sm" onclick="selectAll()">Select all</button>
         <button class="btn btn-secondary btn-sm" onclick="selectNone()">Clear</button>
         <span style="font-size:12px;color:var(--muted)"><strong id="selCount">0</strong> / <strong id="totalCount">0</strong> stores selected</span>
+        <span id="scopeBadges" style="display:inline-flex;gap:6px;font-size:11px"></span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:6px">
@@ -246,11 +297,36 @@
             <option value="manual">Manual (selection order)</option>
           </select>
         </div>
+        <button class="btn btn-secondary btn-sm" onclick="toggleVelTierPanel()" title="Velocity-based send quantities">⚙ Send qty rules</button>
         <button class="btn btn-primary btn-sm" onclick="runRun()">Run replenishment →</button>
         <button class="btn btn-navy btn-sm" onclick="exportNAV()">📋 Export NAV</button>
       </div>
     </div>
+    <!-- Velocity tier editor -->
+    <div id="velTierPanel" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Send quantity by velocity (per store · per SKU)</span>
+        <span style="font-size:11px;color:var(--hint)">— weekly velocity = 90d sales ÷ 12.857</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="allowOverCapToggle" onchange="onOverCapToggle()"> Allow over-capacity sends
+        </label>
+      </div>
+      <div id="velTierRows" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-secondary btn-sm" onclick="addVelTier()">+ Add tier</button>
+        <button class="btn btn-secondary btn-sm" onclick="resetVelTiers()">↺ Reset to defaults</button>
+      </div>
+    </div>
     <div class="store-grid" id="storeGrid"></div>
+    <!-- Priority order preview -->
+    <div id="priorityListWrap" style="margin-top:14px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);display:none">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Replenishment priority order</span>
+        <span id="priorityModeLbl" class="pill p-info" style="font-size:10px"></span>
+        <span style="font-size:11px;color:var(--hint)">— warehouse stock fills these stores in this exact sequence</span>
+      </div>
+      <ol id="priorityList" style="margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px"></ol>
+    </div>
   </div>
 
   <!-- Run summary -->
@@ -447,11 +523,13 @@
     <span style="font-size:11px;color:var(--muted)">Click any cell to edit · Tab/Enter/arrows to navigate</span>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
       <span id="capBadge" style="display:none" class="pill p-warn">0 changes</span>
-      <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import capacity from Excel">⬆ Import<input type="file" accept=".xlsx,.xls" onchange="importCapFromFile(this)" style="display:none"></label>
+      <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import capacity from Excel">⬆ Import<input type="file" id="capFile" accept=".xlsx,.xls,.csv" onchange="importCapFromFile(this)" style="display:none"></label>
+      <button class="btn btn-secondary btn-sm" onclick="downloadCapTemplate()" title="Download a 5-row template to fill in">⬇ Template</button>
       <button class="btn btn-green btn-sm" onclick="exportCapXLSXAndSave()">⬇ Export &amp; Save</button>
       <button class="btn btn-secondary btn-sm" onclick="resetCap()">↺ Reset</button>
     </div>
   </div>
+  <div id="capUpStatus" style="margin-bottom:10px"></div>
   <div class="cap-wrap" id="capWrap"></div>
   <div style="display:flex;gap:14px;padding:9px 14px;background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-lg) var(--radius-lg);font-size:11px;color:var(--muted);flex-wrap:wrap" id="capSummary"></div>
 </div>
@@ -589,63 +667,13 @@
 <!-- SETTINGS -->
 <div class="panel" id="panel-settings">
   <div class="card">
-    <div class="card-title">Data source</div>
-    <div style="display:flex;align-items:center;gap:10px">
-      <span style="font-size:12px;color:var(--muted)">Mode:</span>
-      <div class="toggle-group">
-        <button class="topt active" id="mBtn-sample" onclick="setMode('sample')">Sample data</button>
-        <button class="topt" id="mBtn-live" onclick="setMode('live')">Live Shopify POS</button>
-      </div>
-    </div>
-  </div>
-  <div class="card">
     <div class="card-title">NAV export settings</div>
     <div class="row row2" style="margin-bottom:10px">
-      <div class="field"><label>Warehouse name in NAV</label><input type="text" id="cfgWH" value="MAIN WAREHOUSE"></div>
-      <div class="field"><label>Action Message value</label><input type="text" id="cfgAction" value="New"></div>
+      <div class="field"><label>Warehouse name in NAV</label><input type="text" id="cfgWH" value="MAIN WAREHOUSE" onchange="saveNavSettings()"></div>
+      <div class="field"><label>Action Message value</label><input type="text" id="cfgAction" value="New" onchange="saveNavSettings()"></div>
     </div>
     <div style="font-size:11px;font-weight:500;color:var(--muted);margin-bottom:8px">NAV location codes per store</div>
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px" id="navLocMap"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">Store priority — when warehouse stock is limited, which store gets filled first?</div>
-    <div class="row row3" style="margin-bottom:10px">
-      <div class="field">
-        <label>Priority mode</label>
-        <select id="cfgPriority" onchange="savePriority()">
-          <option value="urgency">1 — Urgency (lowest days of stock first)</option>
-          <option value="velocity">2 — Velocity (highest 90d sales first)</option>
-          <option value="manual">3 — Manual (order I selected the stores)</option>
-        </select>
-      </div>
-    </div>
-    <div style="font-size:11px;color:var(--muted);padding:8px 12px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)" id="priorityDesc">
-      Stores closest to stockout (lowest days of stock remaining) are allocated warehouse units first.
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Replenishment rules</div>
-    <div class="row row3" style="margin-bottom:10px">
-      <div class="field"><label>Velocity window (days)</label><input type="text" id="cfgV" value="90"></div>
-      <div class="field"><label>Hot seller threshold (units/90d)</label><input type="text" id="cfgH" value="3"></div>
-      <div class="field"><label>Reorder trigger (days left ≤)</label><input type="text" id="cfgD" value="30"></div>
-    </div>
-    <div class="row row2" style="margin-bottom:10px">
-      <div class="field"><label>Default QTY per SKU</label><input type="text" id="cfgDQ" value="1"></div>
-      <div class="field"><label>Hot seller QTY</label><input type="text" id="cfgHQ" value="2"></div>
-    </div>
-    <button class="btn btn-primary btn-sm" onclick="applySettings()">Apply & recalculate</button>
-  </div>
-  <div class="card">
-    <div class="card-title">Capacity matrix upload</div>
-    <label class="upload-box">
-      <input type="file" accept=".xlsx,.xls,.csv" id="capFile" onchange="parseCapFile(this)">
-      <div style="font-size:20px;margin-bottom:6px">📊</div>
-      <div style="font-size:13px;font-weight:500">Upload store_capacity_matrix.xlsx</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:3px">Store Code · Store Name · Brand · Type · Max Capacity</div>
-    </label>
-    <div id="capUpStatus" style="margin-top:8px"></div>
   </div>
 </div>
 
@@ -713,7 +741,8 @@ const TCOL={'Sunglasses':'#378ADD','Optical':'#639922','Kids':'#EF9F27'};
 const COST={'Ray-Ban':52,'Oakley':70,'Gucci':210,'Prada':215,'Tom Ford':180,'Maui Jim':95,'Versace':140,'Tiffany':130};
 const DCAP={'Ray-Ban':{Sunglasses:60,Optical:40,Kids:20},'Oakley':{Sunglasses:50,Optical:30,Kids:15},'Gucci':{Sunglasses:25,Optical:20,Kids:0},'Prada':{Sunglasses:25,Optical:20,Kids:0},'Tom Ford':{Sunglasses:25,Optical:20,Kids:0},'Maui Jim':{Sunglasses:40,Optical:25,Kids:10},'Versace':{Sunglasses:20,Optical:15,Kids:0},'Tiffany':{Sunglasses:15,Optical:12,Kids:0}};
 
-const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],
+const VEL_TIERS_DEFAULT=[{minPerWeek:0,qty:1},{minPerWeek:1,qty:2},{minPerWeek:3,qty:3},{minPerWeek:7,qty:5}];
+const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),allowOverCap:false,exceptions:new Set(),
   raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
 };
 let DATA=[],charts={};
@@ -799,34 +828,50 @@ function buildRecos(){
   S.wh.forEach(w=>{if(w.sku) whSkuMap[String(w.sku).toLowerCase()]=w.whQty;});
 
   S.recos=[];
+  // Inherit Brand/Type filters from Inventory tab — only those flow into replenishment
+  const invBrands=getFilterValues('invBrandFilter');
+  const invTypes=getFilterValues('invTypeFilter');
   DATA.forEach(d=>{
+    // Skip if (storeId, sku) is on the exception list
+    if(isExcepted(d.storeId,d.sku)) return;
+    // Skip if brand/type not in Inventory tab filter selection
+    if(invBrands.length&&!invBrands.includes(d.brand)) return;
+    if(invTypes.length&&!invTypes.includes(d.type)) return;
     // Try SKU match first, then brand+type fallback
     const skuKey=String(d.sku||'').toLowerCase();
     const whQty=whSkuMap[skuKey]!==undefined ? whSkuMap[skuKey] : (whMap[d.brand+'|'+d.type]||d.whQty||0);
     const wh={whQty};
     const daily=d.velocity90/90;
     const daysLeft=daily>0?Math.round(d.storeQty/daily):999;
-    const isHot=d.velocity90>=S.hotT;
-    const targetQty=isHot?S.hotQty:S.defQty;
-    const needed=Math.max(0,targetQty-d.storeQty);
+    // Tier-based send qty: per-store, per-SKU weekly velocity → tier qty
+    const tierQty=getQtyForRow(d);
+    const isHot=tierQty>1;
+    // Capacity gate: by default don't overfill the shelf (skip if no room)
+    const room=Math.max(0,(d.cap||0)-d.storeQty);
+    const desiredQty=S.allowOverCap?tierQty:Math.min(tierQty,room);
     const seasonal=d.priorYear90>d.velocity90*1.3;
     const signals=[];
     if(isHot) signals.push('hot');
     if(daysLeft<=S.reorderD&&daily>0) signals.push('low');
     if(d._synthetic) signals.push('low'); // zero store stock — always needs replenishment
     if(seasonal) signals.push('seasonal');
-    if((needed>0||signals.length>0)&&wh.whQty>0){
-      S.recos.push({...d,daysLeft:daysLeft===999?'—':daysLeft,whQty:wh.whQty,transferQty:Math.min(needed,wh.whQty),signals,isHot,seasonal});
+    if(desiredQty>0&&wh.whQty>0){
+      S.recos.push({...d,daysLeft:daysLeft===999?'—':daysLeft,whQty:wh.whQty,transferQty:Math.min(desiredQty,wh.whQty),signals,isHot,seasonal});
     }
   });
   S.recos.sort((a,b)=>b.signals.length-a.signals.length||b.velocity90-a.velocity90);
   filterActive();
-  // Pre-compute per-store stats for O(1) grid render
+  // Pre-compute per-store stats — respect Inventory brand/type filter
   S.storeStats={};
   STORES.forEach(st=>{
-    const rows=DATA.filter(d=>d.storeId===st.id);
+    let rows=DATA.filter(d=>d.storeId===st.id);
+    if(invBrands.length) rows=rows.filter(d=>invBrands.includes(d.brand));
+    if(invTypes.length) rows=rows.filter(d=>invTypes.includes(d.type));
     const tot=rows.reduce((a,b)=>a+b.storeQty,0);
-    const mx=rows.reduce((a,b)=>a+b.cap,0);
+    // Dedup capacity by (brand,type) to avoid multiplying across SKU rows
+    const capSeen=new Set();
+    let mx=0;
+    rows.forEach(r=>{const k=r.brand+'|'+r.type;if(!capSeen.has(k)){mx+=(S.CAP[st.id]?.[r.brand]?.[r.type]||0);capSeen.add(k);}});
     S.storeStats[st.id]={
       pct: mx>0?Math.round(tot/mx*100):0,
       recos: S.recos.filter(r=>r.storeId===st.id).length
@@ -912,8 +957,275 @@ function getDOS(storeId){
   const vel=rows.reduce((a,d)=>a+d.velocity90,0);
   return vel>0?Math.round(units/(vel/90)):999;
 }
+// ── Velocity tier-based send quantity ─────────────────────────────────────
+function getQtyForRow(d){
+  // Per-store, per-SKU weekly velocity → tier qty
+  const weekly=(d.velocity90||0)/12.857;
+  const tiers=(S.velTiers||VEL_TIERS_DEFAULT).slice().sort((a,b)=>a.minPerWeek-b.minPerWeek);
+  let qty=1;
+  for(const t of tiers){if(weekly>=t.minPerWeek) qty=t.qty;}
+  return qty;
+}
+// ── Persist store selection (sel + selOrder + priority mode) ──────────────
+function saveStoreSelection(){
+  try{
+    localStorage.setItem('de_store_sel_set',JSON.stringify([...S.sel]));
+    localStorage.setItem('de_store_sel_order',JSON.stringify(S.selOrder||[]));
+    localStorage.setItem('de_priority_mode',S.priority||'urgency');
+  }catch(e){}
+}
+function loadStoreSelection(){
+  try{
+    const validIds=new Set(STORES.map(s=>s.id));
+    const savedSet=JSON.parse(localStorage.getItem('de_store_sel_set')||'null');
+    const savedOrder=JSON.parse(localStorage.getItem('de_store_sel_order')||'null');
+    const savedMode=localStorage.getItem('de_priority_mode');
+    if(Array.isArray(savedSet)){
+      S.sel=new Set(savedSet.filter(id=>validIds.has(id)));
+    }
+    if(Array.isArray(savedOrder)){
+      S.selOrder=savedOrder.filter(id=>validIds.has(id));
+    }
+    if(savedMode) S.priority=savedMode;
+    return S.sel.size>0;
+  }catch(e){return false;}
+}
+// ── Persist velocity tiers + over-cap toggle ──────────────────────────────
+function saveVelTiers(){
+  try{
+    localStorage.setItem('de_vel_tiers',JSON.stringify(S.velTiers));
+    localStorage.setItem('de_allow_overcap',S.allowOverCap?'1':'0');
+  }catch(e){}
+}
+function loadVelTiers(){
+  try{
+    const raw=localStorage.getItem('de_vel_tiers');
+    if(raw){const parsed=JSON.parse(raw);if(Array.isArray(parsed)&&parsed.length) S.velTiers=parsed;}
+    S.allowOverCap=localStorage.getItem('de_allow_overcap')==='1';
+  }catch(e){}
+}
+// ── Velocity tier editor UI ───────────────────────────────────────────────
+function toggleVelTierPanel(){
+  const p=document.getElementById('velTierPanel');
+  if(!p) return;
+  if(p.style.display==='none'){p.style.display='block';renderVelTiers();}
+  else p.style.display='none';
+}
+function renderVelTiers(){
+  const wrap=document.getElementById('velTierRows');if(!wrap) return;
+  document.getElementById('allowOverCapToggle').checked=!!S.allowOverCap;
+  const tiers=S.velTiers.slice().sort((a,b)=>a.minPerWeek-b.minPerWeek);
+  wrap.innerHTML=tiers.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;font-size:13px">
+    <span style="min-width:100px;font-size:11px;color:var(--muted)">If ≥</span>
+    <input type="number" min="0" step="0.5" value="${t.minPerWeek}" style="width:80px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text)" onchange="updateVelTier(${i},'minPerWeek',this.value)">
+    <span style="font-size:11px;color:var(--muted)">units/week → send</span>
+    <input type="number" min="0" step="1" value="${t.qty}" style="width:80px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text)" onchange="updateVelTier(${i},'qty',this.value)">
+    <span style="font-size:11px;color:var(--muted)">units</span>
+    ${tiers.length>1?`<button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="removeVelTier(${i})">✕</button>`:''}
+  </div>`).join('');
+}
+function updateVelTier(i,field,val){
+  const tiers=S.velTiers.slice().sort((a,b)=>a.minPerWeek-b.minPerWeek);
+  const t=tiers[i];if(!t) return;
+  t[field]=Math.max(0,parseFloat(val)||0);
+  S.velTiers=tiers;saveVelTiers();renderVelTiers();
+}
+function addVelTier(){S.velTiers.push({minPerWeek:10,qty:5});saveVelTiers();renderVelTiers();}
+function removeVelTier(i){
+  const tiers=S.velTiers.slice().sort((a,b)=>a.minPerWeek-b.minPerWeek);
+  tiers.splice(i,1);S.velTiers=tiers.length?tiers:[{minPerWeek:0,qty:1}];saveVelTiers();renderVelTiers();
+}
+function resetVelTiers(){if(!confirm('Reset velocity tiers to defaults?')) return;S.velTiers=VEL_TIERS_DEFAULT.map(t=>({...t}));S.allowOverCap=false;saveVelTiers();renderVelTiers();}
+function onOverCapToggle(){S.allowOverCap=document.getElementById('allowOverCapToggle').checked;saveVelTiers();}
+// ── Capacity matrix template ──────────────────────────────────────────────
+function downloadCapTemplate(){
+  const examples=[
+    ['Store Code','Store Name','Brand','Type','Max Capacity'],
+    ['67928129710','Just One Look (Miami)','Ray-Ban','Sunglasses',24],
+    ['67938123950','Eyes on Lincoln (Miami Beach)','Ray-Ban','Sunglasses',18],
+    ['67928162478','PV2 Dolphin (Miami)','Oakley','Sunglasses',12],
+    ['67938156718','DE Mall of San Juan (San Juan)','Tom Ford','Optical',8],
+    ['67938189486','DE Brickell (Miami)','Persol','Sunglasses',10]
+  ];
+  const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(examples);
+  ws['!cols']=[{wch:14},{wch:34},{wch:18},{wch:13},{wch:13}];
+  XLSX.utils.book_append_sheet(wb,ws,'Capacity Matrix');
+  XLSX.writeFile(wb,'DE_Capacity_Template.xlsx');
+}
+// ── Exception list (Store Code + Variant SKU pairs to exclude) ────────────
+function excKey(sid,sku){return String(sid).trim()+'|'+normSku(sku).toLowerCase();}
+function isExcepted(sid,sku){return S.exceptions&&S.exceptions.has(excKey(sid,sku));}
+function loadExcFromLocalStorage(){
+  try{
+    const raw=localStorage.getItem('de_exceptions_v1');
+    if(!raw){S.exceptions=new Set();updateExcCount();return;}
+    const arr=JSON.parse(raw);
+    S.exceptions=new Set(Array.isArray(arr)?arr:[]);
+    updateExcCount();
+  }catch(e){S.exceptions=new Set();updateExcCount();}
+}
+function saveExcToLocalStorage(){
+  try{localStorage.setItem('de_exceptions_v1',JSON.stringify([...S.exceptions]));}catch(e){}
+  updateExcCount();
+}
+function updateExcCount(){
+  const el=document.getElementById('excCount');
+  if(el) el.textContent=S.exceptions?.size?S.exceptions.size+' exception'+(S.exceptions.size===1?'':'s')+' loaded':'No exceptions loaded';
+  renderExcList();
+}
+function renderExcList(){
+  const body=document.getElementById('excListBody');if(!body) return;
+  // Refresh store dropdown for the manual-add form
+  const sel=document.getElementById('excAddStore');
+  if(sel){
+    const cur=sel.value;
+    sel.innerHTML='<option value="">— select store —</option>'+
+      (STORES||[]).map(st=>`<option value="${st.id}">${st.id} — ${st.short}</option>`).join('');
+    if(cur) sel.value=cur;
+  }
+  if(!S.exceptions||!S.exceptions.size){
+    body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--hint);font-size:12px">No exceptions yet. Import a file or add one above.</td></tr>';
+    return;
+  }
+  const storeNameById={};(STORES||[]).forEach(s=>storeNameById[s.id]=s.short);
+  // Sort by store ID then SKU for stable display
+  const rows=[...S.exceptions].map(k=>{const[sid,sku]=k.split('|');return{sid,sku,key:k};})
+    .sort((a,b)=>a.sid.localeCompare(b.sid)||a.sku.localeCompare(b.sku));
+  body.innerHTML=rows.map(r=>`<tr style="border-top:1px solid var(--border)">
+    <td style="padding:8px 12px;font-family:monospace;font-size:12px">${r.sid}</td>
+    <td style="padding:8px 12px">${storeNameById[r.sid]||'<span style="color:var(--hint)">(unknown)</span>'}</td>
+    <td style="padding:8px 12px;font-family:monospace">${r.sku}</td>
+    <td style="padding:6px 12px;text-align:right"><button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:11px" onclick="removeExc('${r.sid}','${r.sku}')">✕ Remove</button></td>
+  </tr>`).join('');
+}
+function addExcManual(){
+  const sid=document.getElementById('excAddStore').value.trim();
+  const skuRaw=document.getElementById('excAddSku').value;
+  const sku=normSku(skuRaw).toLowerCase();
+  if(!sid){alert('Pick a store.');return;}
+  if(!sku){alert('Enter a Variant SKU.');return;}
+  if(S.exceptions.has(excKey(sid,sku))){alert('That exception already exists.');return;}
+  S.exceptions.add(excKey(sid,sku));
+  saveExcToLocalStorage();
+  document.getElementById('excAddSku').value='';
+  document.getElementById('excAddSku').focus();
+  if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+}
+function removeExc(sid,sku){
+  S.exceptions.delete(excKey(sid,sku));
+  saveExcToLocalStorage();
+  if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+}
+function parseExcFile(input){
+  const file=input.files[0];if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const sn=wb.SheetNames.includes('Exceptions')?'Exceptions':wb.SheetNames[0];
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''});
+      // Replace existing list (per user spec: reupload replaces)
+      S.exceptions=new Set();
+      let n=0,bad=0;
+      rows.forEach(r=>{
+        const sid=String(r['Store Code']||'').trim();
+        const sku=normSku(r['Variant SKU']||r['SKU']||'');
+        if(!sid||!sku){bad++;return;}
+        S.exceptions.add(excKey(sid,sku));
+        n++;
+      });
+      saveExcToLocalStorage();
+      const skipped=bad?` · ${bad} skipped (missing Store Code or SKU)`:'';
+      document.getElementById('excUpStatus').innerHTML=`<div class="sb s-ok">✓ Loaded ${n} exceptions from ${file.name}${skipped} · saved</div>`;
+      if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+    }catch(e){document.getElementById('excUpStatus').innerHTML=`<div class="sb s-err">✗ ${e.message}</div>`;}
+  };
+  reader.readAsArrayBuffer(file);
+}
+function downloadExcTemplate(){
+  const examples=[
+    ['Store Code','Variant SKU'],
+    ['67938255022','313422'],
+    ['67938255022','288242'],
+    ['67928129710','313458'],
+    ['67938123950','313428'],
+    ['67928162478','165731']
+  ];
+  const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(examples);
+  // Force "Variant SKU" column to text so leading zeros / large numbers don't get reformatted
+  ws['!cols']=[{wch:14},{wch:18}];
+  for(let i=1;i<examples.length;i++){
+    const cell=ws['B'+(i+1)];if(cell){cell.t='s';cell.v=String(cell.v);}
+  }
+  XLSX.utils.book_append_sheet(wb,ws,'Exceptions');
+  XLSX.writeFile(wb,'DE_Exception_List_Template.xlsx');
+}
+function exportExcList(){
+  if(!S.exceptions||!S.exceptions.size){alert('Exception list is empty.');return;}
+  const rows=[['Store Code','Variant SKU']];
+  [...S.exceptions].forEach(k=>{const[sid,sku]=k.split('|');rows.push([sid,sku]);});
+  const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:14},{wch:18}];
+  // Force Variant SKU column to text — preserves leading zeros and prevents auto-formatting
+  for(let i=1;i<rows.length;i++){
+    const cell=ws['B'+(i+1)];if(cell){cell.t='s';cell.v=String(cell.v);}
+  }
+  XLSX.utils.book_append_sheet(wb,ws,'Exceptions');
+  XLSX.writeFile(wb,`DE_Exception_List_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function clearExcList(){
+  if(!confirm('Clear the exception list? This wipes localStorage too.')) return;
+  S.exceptions=new Set();
+  try{localStorage.removeItem('de_exceptions_v1');}catch(e){}
+  updateExcCount();
+  document.getElementById('excUpStatus').innerHTML='<div class="sb s-info">Exception list cleared.</div>';
+  if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+}
 
 // Store selection
+function renderScopeBadges(){
+  const el=document.getElementById('scopeBadges');if(!el) return;
+  const invBrands=getFilterValues('invBrandFilter');
+  const invTypes=getFilterValues('invTypeFilter');
+  const totalBrands=BRANDS?.length||0;
+  const totalTypes=TYPES?.length||0;
+  const bCount=invBrands.length||totalBrands;
+  const tCount=invTypes.length||totalTypes;
+  const bAll=invBrands.length===0;
+  const tAll=invTypes.length===0;
+  el.innerHTML=`
+    <span class="pill p-info" style="font-size:10px">${S.sel.size} stores</span>
+    <span class="pill p-info" style="font-size:10px" title="${bAll?'All brands (no Inventory filter)':'Inventory filter applied'}">${bCount} brand${bCount===1?'':'s'}${bAll?' (all)':''}</span>
+    <span class="pill p-info" style="font-size:10px" title="${tAll?'All types (no Inventory filter)':'Inventory filter applied'}">${tCount} type${tCount===1?'':'s'}${tAll?' (all)':''}</span>
+  `;
+}
+function renderPriorityList(){
+  const wrap=document.getElementById('priorityListWrap');
+  if(!wrap) return;
+  if(!S.sel.size){wrap.style.display='none';return;}
+  wrap.style.display='block';
+  const order=getStorePriorityOrder();
+  const mode=S.priority||'urgency';
+  const modeLbl={manual:'Manual (selection order)',urgency:'Urgency (days of stock)',velocity:'Velocity (90d sales)'}[mode]||mode;
+  document.getElementById('priorityModeLbl').textContent=modeLbl;
+  const html=order.map((id,i)=>{
+    const st=STORES.find(s=>s.id===id);if(!st) return '';
+    const stats=S.storeStats?.[id]||{pct:0};
+    let metric='';
+    if(mode==='urgency'){const d=getDOS(id);metric=`${d>=999?'∞':d} days of stock`;}
+    else if(mode==='velocity'){const v=DATA.filter(d=>d.storeId===id).reduce((a,d)=>a+d.velocity90,0);metric=`${v.toLocaleString()} units / 90d`;}
+    else metric=`Selected #${i+1}`;
+    const pctCol=stats.pct<30?'#E24B4A':stats.pct<60?'#EF9F27':stats.pct<90?'#639922':'#185FA5';
+    return `<li style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);font-size:13px">
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:12px">${i+1}</span>
+      <span style="flex:1;font-weight:500">${st.short}</span>
+      <span style="font-size:11px;color:var(--muted)">${st.id}</span>
+      <span class="st-pill" style="background:${pctCol}22;color:${pctCol};font-size:10px">${stats.pct}% full</span>
+      <span style="font-size:11px;color:var(--hint);min-width:120px;text-align:right">${metric}</span>
+    </li>`;
+  }).join('');
+  document.getElementById('priorityList').innerHTML=html;
+}
 function renderStoreGrid(){
   document.getElementById('totalCount').textContent=STORES.length;
   document.getElementById('selCount').textContent=S.sel.size;
@@ -934,6 +1246,8 @@ function renderStoreGrid(){
       <div style="font-size:9px;color:var(--hint);margin-top:3px">${st.city||''}</div>
     </div>`;
   }).join('');
+  renderScopeBadges();
+  renderPriorityList();
 }
 function toggleStore(id){
   if(S.sel.has(id)){
@@ -943,11 +1257,12 @@ function toggleStore(id){
     S.sel.add(id);
     S.selOrder.push(id);
   }
+  saveStoreSelection();
   renderStoreGrid();filterActive();
   document.getElementById('runSummary').style.display='none';
 }
-function selectAll(){S.selOrder=STORES.map(s=>s.id);STORES.forEach(st=>S.sel.add(st.id));renderStoreGrid();filterActive();}
-function selectNone(){S.sel.clear();S.selOrder=[];renderStoreGrid();filterActive();}
+function selectAll(){S.selOrder=STORES.map(s=>s.id);STORES.forEach(st=>S.sel.add(st.id));saveStoreSelection();renderStoreGrid();filterActive();}
+function selectNone(){S.sel.clear();S.selOrder=[];saveStoreSelection();renderStoreGrid();filterActive();}
 function runRun(){
   if(!S.sel.size){alert('Select at least one store.');return;}
   filterActive();
@@ -991,13 +1306,14 @@ function showTab(t){
   if(t==='nav'){populateNavStore();renderNAVPreview();}
   if(t==='inventory'){populateInvFilters();renderInv();}
   if(t==='capacity') renderCap();
+  if(t==='exceptions') renderExcList();
 }
 
 function setMode(m){
   S.mode=m;
-  ['sample','live'].forEach(x=>document.getElementById('mBtn-'+x).classList.toggle('active',x===m));
-  document.getElementById('modeBadge').textContent=m==='live'?'Live Shopify POS':'Sample Data';
-  document.getElementById('modeBadge').className='badge '+(m==='live'?'badge-live':'badge-sample');
+  ['sample','live'].forEach(x=>{const b=document.getElementById('mBtn-'+x);if(b) b.classList.toggle('active',x===m);});
+  const badge=document.getElementById('modeBadge');
+  if(badge){badge.textContent=m==='live'?'Live Shopify POS':'Sample Data';badge.className='badge '+(m==='live'?'badge-live':'badge-sample');}
   if(m==='sample'){
     buildSample();
   } else if(m==='live'&&S.liveData){
@@ -1311,10 +1627,12 @@ function populateInvFilters(){
 }
 
 function renderInv(){
-  const sel=S.sel.size?[...S.sel]:STORES.map(s=>s.id);
+  // Inventory tab is driven ONLY by its own filters — not by Store Selection tab (S.sel).
+  // Store Selection tab governs replenishment scope, not Inventory views.
   const invStoreFilter=getFilterValues('invStoreFilter');
   const invBrandFilter=getFilterValues('invBrandFilter');
   const invTypeFilter=getFilterValues('invTypeFilter');
+  const sel=invStoreFilter.length?invStoreFilter:STORES.map(s=>s.id);
   const hasPY=(S.raw.ordersPY||[]).length>0;
   const fcModel=(document.getElementById('invForecastModel')?.value)||'trend';
   const fcLabel={trend:'Trend',wma:'WMA',seasonal:'Seasonal',exp:'EXP'}[fcModel]||'Trend';
@@ -1464,6 +1782,8 @@ function handleInvFilter(id,saveFn){
   if(saveFn) saveFn();
   renderInv();
   updateDash();
+  // Inventory filter changes affect replenishment scope (brands/types)
+  if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
 }
 function resetInvFilters(){
   ['invStoreFilter','invBrandFilter','invTypeFilter'].forEach(id=>{
@@ -1685,16 +2005,25 @@ function populateNavStore(prefix=''){
   const el=document.getElementById(prefix+'navStore');if(!el) return;
   el.innerHTML=[...new Set(r.map(x=>x.storeId))].map(sid=>{const st=STORES.find(s=>s.id===sid);return`<option value="${sid}">${sid} — ${st?.short||sid}</option>`;}).join('');
 }
+// Read live NAV location for a store: prefer the editable input in Settings,
+// fall back to STORES baked-in navLoc, then to raw store ID.
+function getNavLocForStore(sid){
+  const input=document.getElementById('navLoc-'+sid);
+  if(input&&input.value.trim()) return input.value.trim();
+  const st=STORES.find(s=>s.id===sid);
+  return st?.navLoc||sid;
+}
 function renderNAVPreview(prefix=''){
   const g=id=>document.getElementById(prefix+id);
   const sid=g('navStore')?.value;
   const r=(S.activeRecos.length?S.activeRecos:S.recos).filter(x=>x.storeId===sid);
   const st=STORES.find(s=>s.id===sid);
+  const navLoc=getNavLocForStore(sid);
   const navPrev=g('navPreview');if(!navPrev) return;
   if(!r.length){navPrev.innerHTML='<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">No recommendations for this store.</div>';return;}
   navPrev.innerHTML=`
     <div style="background:#F0F6FC;border:1px solid #BDD7EE;border-radius:8px;overflow:hidden">
-      <div style="background:#1F4E79;color:#fff;padding:8px 14px;font-size:12px;font-weight:600">${st?.navLoc||sid} · ${r.length} lines · ${r.reduce((a,b)=>a+b.transferQty,0)} units · ${new Date().toLocaleDateString()}</div>
+      <div style="background:#1F4E79;color:#fff;padding:8px 14px;font-size:12px;font-weight:600">${navLoc} · ${r.length} lines · ${r.reduce((a,b)=>a+b.transferQty,0)} units · ${new Date().toLocaleDateString()}</div>
       <div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;min-width:100%">
         <thead><tr style="background:#1F4E79;color:#fff">${['ITEM','No. (SKU)','Action Message','Accept','Description','Location Code','Original QTY','QTY','Brand','Type','Signal'].map((h,i)=>`<th style="padding:6px 9px;font-weight:500;border:1px solid #164069;${i>=8?'background:#2E6096':''}">${h}</th>`).join('')}</tr></thead>
         <tbody>${r.map((x,i)=>`<tr style="background:${i%2?'#F0F6FC':'#fff'}">
@@ -1703,7 +2032,7 @@ function renderNAVPreview(prefix=''){
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center">New</td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center;color:#3B6D11;font-weight:700">Yes</td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hesc(x.desc)}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE">${hesc(st?.navLoc||sid)}</td>
+          <td style="padding:5px 9px;border:1px solid #BDD7EE">${hesc(navLoc)}</td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center"></td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center;font-weight:700;color:${x.transferQty>1?'#A32D2D':'inherit'}">${x.transferQty}</td>
           <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB">${hesc(x.brand)}</td>
@@ -1726,7 +2055,7 @@ function exportNAV(){
   const byStore={};
   r.forEach(x=>{if(!byStore[x.storeId]) byStore[x.storeId]={lines:[],units:0};byStore[x.storeId].lines.push(x);byStore[x.storeId].units+=x.transferQty;});
   const sumRows=[[`DESIGNER EYES — NAV TRANSFER ORDERS · ${dt} · From: ${wh}`],[],['Store Code','Store Name','NAV Location','Lines','Total Units']];
-  Object.entries(byStore).forEach(([sid,sd])=>{const st=STORES.find(s=>s.id===sid);sumRows.push([sid,st?.name||'',st?.navLoc||sid,sd.lines.length,sd.units]);});
+  Object.entries(byStore).forEach(([sid,sd])=>{const st=STORES.find(s=>s.id===sid);sumRows.push([sid,st?.name||'',getNavLocForStore(sid),sd.lines.length,sd.units]);});
   sumRows.push([]);sumRows.push(['GRAND TOTAL','','',r.length,r.reduce((a,b)=>a+b.transferQty,0)]);
   const ws0=XLSX.utils.aoa_to_sheet(sumRows);ws0['!cols']=[{wch:12},{wch:30},{wch:24},{wch:8},{wch:12}];
   XLSX.utils.book_append_sheet(wb,ws0,'RUN SUMMARY');
@@ -2045,10 +2374,10 @@ function importCapFromFile(input){
       applyCapToData();
       renderCap();
       if(DATA.length) renderInv();
-      const s=document.getElementById('capSummary');
-      if(s) s.innerHTML+=`<span style="color:var(--green);margin-left:8px">✓ Imported ${n} rows · saved to localStorage</span>`;
+      const st=document.getElementById('capUpStatus');
+      if(st) st.innerHTML=`<div class="sb s-ok">✓ Imported ${n} rows from ${file.name} · saved to localStorage</div>`;
       input.value='';
-    }catch(e){alert('Import error: '+e.message);}
+    }catch(e){const st=document.getElementById('capUpStatus');if(st) st.innerHTML=`<div class="sb s-err">✗ Import error: ${e.message}</div>`;else alert('Import error: '+e.message);}
   };
   reader.readAsArrayBuffer(file);
 }
@@ -2082,17 +2411,8 @@ function applyNewBrand(){
 }
 
 // Settings
-function applySettings(){
-  S.hotT=parseInt(document.getElementById('cfgH').value)||3;
-  S.reorderD=parseInt(document.getElementById('cfgD').value)||30;
-  S.defQty=parseInt(document.getElementById('cfgDQ').value)||1;
-  S.hotQty=parseInt(document.getElementById('cfgHQ').value)||2;
-  buildRecos();renderStoreGrid();
-}
-function savePriority(){
-  const v=document.getElementById('cfgPriority')?.value||'urgency';
-  syncPriority(v);
-}
+// applySettings + savePriority removed — Settings UI consolidated into
+// Store Selection tab (priority dropdown + Send qty rules panel).
 function syncPriority(val){
   S.priority=val;
   // Sync both dropdowns
@@ -2108,8 +2428,43 @@ function syncPriority(val){
   };
   const el=document.getElementById('priorityDesc');
   if(el) el.textContent=desc[val]||'';
+  saveStoreSelection();
+  renderPriorityList();
 }
-function populateNavLocMap(){document.getElementById('navLocMap').innerHTML=STORES.map(st=>`<div class="field"><label>${st.id} — ${st.short}</label><input type="text" id="navLoc-${st.id}" value="${st.navLoc}"></div>`).join('');}
+function populateNavLocMap(){
+  // Layer saved navLoc values from localStorage on top of baked-in STORES.navLoc
+  const saved=loadNavLocMap();
+  document.getElementById('navLocMap').innerHTML=STORES.map(st=>{
+    const val=saved[st.id]||st.navLoc||'';
+    return `<div class="field"><label>${st.id} — ${st.short}</label><input type="text" id="navLoc-${st.id}" value="${hesc(val)}" onchange="saveNavSettings()"></div>`;
+  }).join('');
+}
+// ── NAV export settings persistence ───────────────────────────────────────
+function saveNavSettings(){
+  try{
+    const wh=document.getElementById('cfgWH')?.value??'';
+    const act=document.getElementById('cfgAction')?.value??'';
+    localStorage.setItem('de_nav_wh',wh);
+    localStorage.setItem('de_nav_action',act);
+    const map={};
+    (STORES||[]).forEach(st=>{
+      const inp=document.getElementById('navLoc-'+st.id);
+      if(inp) map[st.id]=inp.value;
+    });
+    localStorage.setItem('de_nav_loc_map',JSON.stringify(map));
+  }catch(e){}
+}
+function loadNavSettings(){
+  try{
+    const wh=localStorage.getItem('de_nav_wh');
+    const act=localStorage.getItem('de_nav_action');
+    const cw=document.getElementById('cfgWH');if(cw&&wh!==null) cw.value=wh;
+    const ca=document.getElementById('cfgAction');if(ca&&act!==null) ca.value=act;
+  }catch(e){}
+}
+function loadNavLocMap(){
+  try{const raw=localStorage.getItem('de_nav_loc_map');return raw?JSON.parse(raw):{};}catch(e){return{};}
+}
 
 // Live connect
 function clog(m){const el=document.getElementById('connLog');el.textContent+='\n'+m;el.scrollTop=el.scrollHeight;}
@@ -2336,8 +2691,7 @@ async function loadLiveData(itemMap){
     // Final UI
     const brandCount=[...new Set(Object.values(itemMap).map(v=>v.brand))].filter(b=>b&&b!=='Unknown').length;
     setConnStatus('\u2713 '+Object.keys(itemMap).length+' SKUs \xb7 '+brandCount+' brands \xb7 '+retailLocs.length+' stores \xb7 '+ord90.length+' orders \xb7 '+pyOrders.length+' prior year','s-ok');
-    document.getElementById('modeBadge').textContent='Live Shopify POS';
-    document.getElementById('modeBadge').className='badge badge-live';
+    {const _b=document.getElementById('modeBadge');if(_b){_b.textContent='Live Shopify POS';_b.className='badge badge-live';}}
     setProgress(100);setStep('2b','ok');
     const ri=document.getElementById('rawInspector');if(ri) ri.style.display='block';
     const sc=document.getElementById('schemaCard');if(sc) sc.style.display='block';
@@ -2441,8 +2795,7 @@ async function testConn(){
     const locs=data.locations||[];
     locs.forEach(l=>clog('  ✓ '+l.id+': '+l.name+' ('+( l.city||'')+')'));
     setConnStatus('✓ Connected — '+locs.length+' locations. Click Load live data next.','s-ok');
-    document.getElementById('modeBadge').textContent='Live Shopify POS';
-    document.getElementById('modeBadge').className='badge badge-live';
+    {const _b=document.getElementById('modeBadge');if(_b){_b.textContent='Live Shopify POS';_b.className='badge badge-live';}}
     setStep(1,'ok');
     // setStep handles unlocking both 2A buttons
   }catch(e){
@@ -2468,8 +2821,7 @@ async function loadCatalogFromShopify(){
   setConnStatus('2A \u2014 Full Shopify load (~5-8 min)...','s-info');
   setProgress(0);
   ['btnCache','btnLoad'].forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;b.style.opacity='.4';b.style.cursor='not-allowed';}});
-  const badge=document.getElementById('modeBadge');
-  badge.textContent='Loading...';badge.className='badge badge-sample';
+  {const badge=document.getElementById('modeBadge');if(badge){badge.textContent='Loading...';badge.className='badge badge-sample';}}
   try{
     // --- Pass B: all variants ---
     setProgress(5);clog('[2A-1] Variants (Pass B)...');
@@ -2721,9 +3073,17 @@ function processLiveData(locs,invLevels,orders){
   loadCapFromLocalStorage();
   applyCapToData();
   S.liveData={stores:[...STORES],data:[...DATA],brands:[...BRANDS],types:[...TYPES]};
-  S.sel.clear();STORES.forEach(st=>S.sel.add(st.id));
+  // Restore saved store selection (intersected with current STORES) — fall back to all
+  loadVelTiers();
+  loadExcFromLocalStorage();
+  if(!loadStoreSelection()){
+    S.sel.clear();STORES.forEach(st=>S.sel.add(st.id));
+    S.selOrder=STORES.map(s=>s.id);
+  }
+  // Sync priority dropdown UI to restored mode
+  syncPriority(S.priority||'urgency');
   buildRecos();renderStoreGrid();populateSimSelects();
-  populateNavLocMap();populateDashFilters();populateCapBrandFilter();populateInvFilters();
+  populateNavLocMap();loadNavSettings();populateDashFilters();populateCapBrandFilter();populateInvFilters();
   clog('\n✓ '+DATA.length+' records across '+STORES.length+' stores ready');
   if(document.getElementById('schemaCard')&&document.getElementById('schemaCard').style.display!=='none') renderSchema();
 }
@@ -3264,13 +3624,13 @@ function copyInspectorJSON(){
 // Keyboard shortcuts
 document.addEventListener('keydown',e=>{
   if(!e.ctrlKey&&!e.metaKey) return;
-  const tabs=['connect','inventory','dashboard','capacity','stores','recommendations','nav','settings'];
+  const tabs=['connect','inventory','dashboard','capacity','exceptions','stores','recommendations','nav','settings'];
   const idx=parseInt(e.key)-1;
   if(idx>=0&&idx<tabs.length){e.preventDefault();showTab(tabs[idx]);}
 });
 
 // Init
-buildSample();selectAll();renderStoreGrid();populateNavLocMap();
+buildSample();loadVelTiers();loadExcFromLocalStorage();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
 showTab('connect');
 
 function saveCredentials(){
