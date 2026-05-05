@@ -13,6 +13,14 @@ Product catalog cached in Supabase to avoid proxy timeout on every session.
 
 ---
 
+## Quick Start
+- Open `DE_Replenishment.html` directly in Chrome (no build step, no dev server)
+- Credentials auto-load from `config.json` on startup; localStorage caches the rest
+- First-time flow: Test connection -> Load from cache -> Upload WH -> Run replenishment
+- Theme: 🌙/☀ toggle in topbar; persists to `de_theme` localStorage key (light/dark)
+
+---
+
 ## Architecture Rules
 
 ### Single File
@@ -40,6 +48,19 @@ Step 4  — Inspect Data
 - `Variant SKU` (from `variants[].sku`) is the ONE universal key across all tables
 - Strip leading apostrophe always: `normSku(s) = String(s||'').replace(/^'+/,'').trim()`
 - `inventory_item_id` is internal bridge only — never expose in downloads or UI
+
+---
+
+## Theme System (light + dark)
+- CSS tokens defined under `:root, [data-theme="light"]` and `[data-theme="dark"]` blocks
+- `data-theme` set on `<html>` before paint (anti-flash boot script reads `localStorage.de_theme`)
+- Glassmorphism on topbar + sticky tabs via `var(--glass)` + `backdrop-filter: blur(14px)`
+- Tokens used everywhere — NO hardcoded `#fff` / hex colors in components (NAV preview ported to tokens, including zebra rows via `var(--surface)` / `var(--surface-2)`)
+- Fonts: Inter (body) + JetBrains Mono (`.mono`, `code`, `.metric-val`, `.sim-val`, KPI numbers, SKU columns) loaded from Google Fonts CDN
+- `font-variant-numeric: tabular-nums` on body + tables to prevent column jitter on data updates
+- Focus rings: `*:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px }`
+- `prefers-reduced-motion` honored globally
+- Skip link: `<a href="#main-content" class="skip-link">` — appears on first Tab keypress
 
 ---
 
@@ -167,20 +188,29 @@ All order URLs include `refunds` in `fields=`. Velocity nets `refund_line_items[
 
 ---
 
-## shopifyFetch — Rate Limit Handling
+## shopifyFetch — Resilient Fetch (8 attempts)
+
+Handles 429 rate limits, 5xx upstream errors (Cloudflare/Vercel/Shopify 502/503/504),
+network errors, and non-JSON 200 responses. Exponential backoff capped at 30s.
 
 ```javascript
-for(let attempt = 0; attempt < 5; attempt++){
-  if(attempt > 0) await new Promise(r => setTimeout(r, attempt * 2000));
-  const r = await fetch(url, {headers});
-  if(r.status === 429){
-    await new Promise(r => setTimeout(r, 3000 + attempt * 2000)); continue;
-  }
-  if(!r.ok) throw new Error('Shopify API error ' + r.status);
-  return await r.json();
+const MAX = 8;
+for(let attempt = 0; attempt < MAX; attempt++){
+  if(attempt > 0) await new Promise(r => setTimeout(r, Math.min(30000, 1500 * Math.pow(1.7, attempt))));
+  let r;
+  try { r = await fetch(url, {headers}); }
+  catch(netErr){ /* retry network errors */ continue; }
+  if(r.status === 429){ await sleep(3000 + attempt * 2000); continue; }       // rate limit
+  if(r.status >= 500 && r.status < 600){ /* retry upstream 5xx */ continue; } // 502/503/504
+  if(!r.ok){ /* throw with cleaned text snippet */ }
+  const txt = await r.text();
+  if(!txt.trim()) return null;
+  try { return JSON.parse(txt); } catch(_){ /* HTML in 200 — retry */ continue; }
 }
-throw new Error('Failed after 5 attempts (rate limited)');
 ```
+
+Without the 5xx retry, a single Cloudflare/Vercel 502 mid-fetch (e.g. on variants page 42 of 124)
+kills the entire 5-8 min Shopify load. With it, the run survives transient upstream errors silently.
 
 ---
 
@@ -334,7 +364,8 @@ Inventory filter changes propagate to: Dashboard widgets (`updateDash`), Capacit
 
 ### Capacity Tab (current)
 - **Top section:** Capacity matrix upload card (file input + "⬇ Download template (5 examples)" button) — moved here from Settings
-- **Toolbar:** `+ Add brand to stores` · `All types` · `All brands` · Import · Export & Save · Reset
+- **Toolbar:** `+ Add brand to stores` · hint text "Filters controlled in Inventory tab" · Import · Template · Export & Save · Reset
+- **Local filter dropdowns hidden** (`capFType` / `capFBrand` are `display:none` with default values that pass through) — Inventory tab is sole filter source
 - **Table:** Brand/Type rows × Store columns (filtered to Inventory selection)
 - **Bottom summary:** scope label · total units · changed-cells count (no Export Excel button — top toolbar is sole action source)
 
@@ -358,6 +389,7 @@ Single card: "Exception list — SKUs to NEVER send to specific stores"
 - Persisted to `localStorage.de_exceptions_v1` as JSON array
 - Loaded on boot AND after every Shopify/cache load (`loadExcFromLocalStorage`)
 - Active in `buildRecos()` — `isExcepted(d.storeId, d.sku)` check skips matching pairs entirely (never enter `S.recos`, never consume warehouse units)
+- **Visible list table** columns: `Store Code · Store Name · Variant SKU · Brand · Type · [Remove]` — Brand/Type looked up from `S.raw.itemMap` at render time (lowercase SKU keys); shows `—` if SKU not in catalog
 
 ### Store Selection Tab (current)
 **Toolbar:** Select all · Clear · `N/Y stores selected` · scope badges (`N stores · N brands (all) · N types (all)`) · Priority dropdown · ⚙ Send qty rules · Run replenishment · Export NAV
@@ -383,6 +415,16 @@ Single card: "Exception list — SKUs to NEVER send to specific stores"
 **Replenishment scope filtering:**
 - `buildRecos()` reads `invBrandFilter` / `invTypeFilter` from Inventory tab — rows whose brand/type isn't selected are skipped (in addition to exception list)
 - `S.storeStats.pct` (powers store tile + priority list `% full`) also honors the same filter, with capacity dedup by `(brand, type)` Set
+
+**Run summary card** (after `runRun()` fires):
+- Header includes `· Priority: X · HH:MM:SS` stamp so user can confirm a fresh run
+- 6 KPI cards in `row3` grid: Stores · NAV lines · Total units · Hot sellers · WH qty before · WH qty after (with `−N` red delta)
+- **Per-store allocation table** below KPIs — ordered by current priority via `getStorePriorityOrder()`. Shows `# · Store · Lines · Units · % of total` with progress bars. This is where priority-mode differences become visible (aggregate KPIs stay stable when WH is the bottleneck).
+
+**Recommendations card** (visible after run):
+- Header includes plain-language description and a pill legend explaining `N lines` / `N units` / `before → after` / `📋 NAV` pills
+- Per-store collapsed cards; each header pill shows total store on-hand `before → after`
+- Table columns: `SKU (NAV No.) · Brand · Type · 90d vel · Store qty · After (green) · WH qty · QTY · Signals`
 
 ### Inventory Tab Table
 Brand x Type grouped: `Brand | Type | On Hand | 90d Sales | Capacity | Fill% | [per-store cols]`
@@ -518,6 +560,22 @@ S = {
 
 ---
 
+## Known Issues (Open)
+- **Capacity bucket over-allocation**: When N SKUs share a (brand,type) bucket, each row's
+  `room = cap - storeQty` is computed independently — combined sends can exceed bucket cap.
+  Fix path: track running consumption inside `buildRecos` per (storeId, brand, type) Map.
+  Workaround until fixed: leave "Allow over-capacity sends" OFF.
+
+---
+
+## Git Workflow
+- `master` is the shipping branch; in-flight work uses worktrees under `.claude/worktrees/`
+- Commit style: imperative subject (e.g. "Fix capacity persistence on reload")
+- Push only when user says "push" / "commit pending" — never auto-push
+- Stale `CLAUDE.md` may exist in old worktrees; the root copy is authoritative
+
+---
+
 ## Common Bugs & Root Causes
 
 | Symptom | Root Cause | Fix |
@@ -547,6 +605,11 @@ S = {
 | Exception list cleared on page reload | No persistence layer | `de_exceptions_v1` JSON array of `storeId\|sku` keys, loaded on boot + after `processLiveData` |
 | Variant SKU column reformatted by Excel (scientific notation) | Cells written as numbers, Excel auto-converts | Set cell `t='s'` and stringify value when writing template/export |
 | Settings tab still shows old Data source / Priority / Replenishment rules cards | Cards not removed during consolidation | Removed; functionality lives in Store Selection tab (priority dropdown, ⚙ Send qty rules); orphaned `applySettings`/`savePriority` deleted |
+| Shopify load dies on transient 502 mid-pagination | `shopifyFetch` only retried 429, threw on 5xx | 8-attempt retry on 5xx + network errors + non-JSON 200 bodies with exponential backoff (1.5s → 30s) |
+| Run summary appears static when changing priority mode | Aggregate KPIs (total units, NAV lines) are WH-bottlenecked → identical regardless of priority order. UI gave no visual hint a re-run happened | Add `· Priority: X · HH:MM:SS` stamp to header + per-store breakdown table (priority effect surfaces visibly per-store) |
+| NAV Transfer Order Preview unreadable in dark mode | Hardcoded hex colors (`#F0F6FC`, `#1F4E79`, `#EBF3FB`) bypassed theme tokens | Port all colors to `var(--surface)` / `var(--surface-2)` / `var(--navy)` / `var(--blue-bg)` etc. |
+| Capacity tab had local brand/type filters compounding with Inventory filters | Legacy `capFType` / `capFBrand` dropdowns left in toolbar | Hide via `display:none` with default values; renderCap continues to read Inventory filters |
+| Top understocked combos showed only dead/discontinued combos | Filter was `c.cap > 0` only — sort ascending by fill% put 0% / 0qty / 0wh at top | Split into TWO widgets: `Replenish-ready` (cap>0, wh>0, vel>0) and `Stockout — WH empty` (cap>0, wh=0, vel>0) |
 
 ---
 
@@ -566,3 +629,5 @@ S = {
 - Read the actual code before diagnosing — never speculate
 - Fix root cause, not symptoms
 - Checklist before every file delivery
+- **MQ** prefix on a request = ask 3-5 clarifying questions before coding (scope, behavior, UI placement, defaults, edge cases). Wait for confirmation before executing.
+- **MC** prefix = respond ultra-concisely; minimum tokens, no preamble

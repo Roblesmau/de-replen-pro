@@ -6,39 +6,95 @@
 <title>Designer Eyes — Replenishment Engine v6.4</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg:       #F8F9FA;
+  :root, [data-theme="light"] {
+    --bg:       #F4F6FA;
     --surface:  #FFFFFF;
-    --border:   rgba(0,0,0,0.08);
-    --border2:  rgba(0,0,0,0.14);
-    --text:     #111827;
-    --muted:    #6B7280;
-    --hint:     #9CA3AF;
-    --blue:     #185FA5;
-    --blue-bg:  #E6F1FB;
-    --green:    #3B6D11;
-    --green-bg: #EAF3DE;
-    --amber:    #BA7517;
-    --amber-bg: #FAEEDA;
-    --red:      #A32D2D;
-    --red-bg:   #FCEBEB;
-    --navy:     #1F4E79;
+    --surface-2:#F8F9FB;
+    --glass:    rgba(255,255,255,0.72);
+    --border:   rgba(15,23,42,0.06);
+    --border2:  rgba(15,23,42,0.12);
+    --text:     #0F172A;
+    --muted:    #64748B;
+    --hint:     #94A3B8;
+    --blue:     #1E40AF;
+    --blue-bg:  #DBEAFE;
+    --green:    #16A34A;
+    --green-bg: #DCFCE7;
+    --amber:    #D97706;
+    --amber-bg: #FEF3C7;
+    --red:      #DC2626;
+    --red-bg:   #FEE2E2;
+    --navy:     #1E3A8A;
+    --shadow-sm:0 1px 2px rgba(15,23,42,0.04);
+    --shadow-md:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04);
+    --shadow-lg:0 8px 32px rgba(15,23,42,0.08);
     --radius:   8px;
     --radius-lg:12px;
+    --radius-xl:16px;
+  }
+  [data-theme="dark"] {
+    --bg:       #06080F;
+    --surface:  #0B0F1A;
+    --surface-2:#10141F;
+    --glass:    rgba(15,20,32,0.65);
+    --border:   rgba(255,255,255,0.08);
+    --border2:  rgba(255,255,255,0.14);
+    --text:     #E2E8F0;
+    --muted:    #94A3B8;
+    --hint:     #64748B;
+    --blue:     #3B82F6;
+    --blue-bg:  rgba(59,130,246,0.15);
+    --green:    #22C55E;
+    --green-bg: rgba(34,197,94,0.15);
+    --amber:    #F59E0B;
+    --amber-bg: rgba(245,158,11,0.15);
+    --red:      #EF4444;
+    --red-bg:   rgba(239,68,68,0.15);
+    --navy:     #60A5FA;
+    --shadow-sm:0 1px 2px rgba(0,0,0,0.4);
+    --shadow-md:0 1px 2px rgba(0,0,0,0.4),0 4px 12px rgba(0,0,0,0.3);
+    --shadow-lg:0 8px 32px rgba(0,0,0,0.5);
   }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:var(--bg); color:var(--text); font-size:13px; min-height:100vh; }
+  html { color-scheme: light dark; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    font-size:13px;
+    min-height:100vh;
+    font-feature-settings:'cv11','ss01';
+    font-variant-numeric: tabular-nums;
+    transition: background-color .2s ease, color .2s ease;
+  }
+  /* Skip link */
+  .skip-link { position:absolute; left:-9999px; top:0; background:var(--blue); color:#fff; padding:8px 16px; border-radius:0 0 8px 0; z-index:9999; font-size:12px; font-weight:600; }
+  .skip-link:focus { left:0; }
+  /* Focus rings — consistent across the app */
+  *:focus { outline: none; }
+  *:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+  }
+  /* Mono numerics for KPI displays + codes */
+  .mono, code, kbd, samp, .metric-val, .sim-val { font-family:'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; }
 
   /* Layout */
   .app { display:flex; flex-direction:column; min-height:100vh; }
-  .topbar { display:flex; align-items:center; justify-content:space-between; padding:0 24px; height:52px; background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:100; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; padding:0 24px; height:52px; background:var(--glass); -webkit-backdrop-filter:saturate(180%) blur(14px); backdrop-filter:saturate(180%) blur(14px); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:100; }
   .logo { font-size:15px; font-weight:600; letter-spacing:-.01em; }
   .logo span { color:var(--blue); }
   .logo sub { font-size:10px; font-weight:400; color:var(--muted); margin-left:6px; vertical-align:middle; }
   .topbar-right { display:flex; gap:8px; align-items:center; }
+  .theme-toggle { width:32px; height:32px; border-radius:8px; border:1px solid var(--border2); background:var(--surface); color:var(--text); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:14px; transition:all .15s; }
+  .theme-toggle:hover { background:var(--surface-2); border-color:var(--blue); }
 
-  .tabs { display:flex; background:var(--surface); border-bottom:1px solid var(--border); padding:0 24px; gap:0; overflow-x:auto; position:sticky; top:52px; z-index:99; }
+  .tabs { display:flex; background:var(--glass); -webkit-backdrop-filter:saturate(180%) blur(14px); backdrop-filter:saturate(180%) blur(14px); border-bottom:1px solid var(--border); padding:0 24px; gap:0; overflow-x:auto; position:sticky; top:52px; z-index:99; }
   .tab { padding:0 16px; height:44px; font-size:12px; font-weight:500; cursor:pointer; border:none; background:none; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
   .tab:hover { color:var(--text); }
   .tab.active { color:var(--blue); border-bottom-color:var(--blue); }
@@ -48,7 +104,7 @@
   .panel.active { display:block; }
 
   /* Cards */
-  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px; margin-bottom:16px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px; margin-bottom:16px; box-shadow:var(--shadow-sm); }
   .card-title { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:14px; }
   .metric-card { background:var(--bg); border-radius:var(--radius); padding:14px 16px; }
   .metric-val { font-size:24px; font-weight:600; line-height:1; letter-spacing:-.02em; }
@@ -66,8 +122,8 @@
   .btn { padding:7px 16px; font-size:12px; font-weight:500; border-radius:var(--radius); cursor:pointer; border:1px solid; transition:all .15s; display:inline-flex; align-items:center; gap:5px; }
   .btn-primary { background:var(--blue); color:#fff; border-color:var(--blue); }
   .btn-primary:hover { opacity:.88; }
-  .btn-secondary { background:#fff; color:var(--text); border-color:var(--border2); }
-  .btn-secondary:hover { background:var(--bg); }
+  .btn-secondary { background:var(--surface); color:var(--text); border-color:var(--border2); }
+  .btn-secondary:hover { background:var(--surface-2); }
   .btn-green { background:var(--green); color:#fff; border-color:var(--green); }
   .btn-green:hover { opacity:.88; }
   .btn-navy { background:var(--navy); color:#fff; border-color:var(--navy); }
@@ -77,8 +133,8 @@
   .btn-xs { padding:3px 8px; font-size:10px; }
 
   /* Forms */
-  input, select, textarea { font-family:inherit; font-size:12px; padding:7px 10px; border:1px solid var(--border2); border-radius:var(--radius); background:#fff; color:var(--text); outline:none; width:100%; transition:border-color .15s; }
-  input:focus, select:focus, textarea:focus { border-color:var(--blue); box-shadow:0 0 0 3px rgba(24,95,165,.1); }
+  input, select, textarea { font-family:inherit; font-size:12px; padding:7px 10px; border:1px solid var(--border2); border-radius:var(--radius); background:var(--surface); color:var(--text); outline:none; width:100%; transition:border-color .15s; }
+  input:focus, select:focus, textarea:focus { border-color:var(--blue); box-shadow:0 0 0 3px var(--blue-bg); }
   .field { display:flex; flex-direction:column; gap:4px; }
   .field label { font-size:11px; font-weight:500; color:var(--muted); }
 
@@ -104,18 +160,18 @@
   .badge-live   { background:var(--green-bg); color:var(--green); border-color:#97C459; }
 
   /* Tables */
-  table { width:100%; border-collapse:collapse; font-size:12px; }
-  th { font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); background:var(--bg); }
+  table { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+  th { font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); background:var(--surface-2); }
   td { padding:8px 10px; border-bottom:1px solid var(--border); }
   tr:last-child td { border-bottom:none; }
-  tr:hover td { background:#FAFAFA; }
+  tr:hover td { background:var(--surface-2); }
 
   /* Store grid */
   .store-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; }
-  .store-tile { border:1px solid var(--border2); border-radius:var(--radius-lg); padding:12px 14px; cursor:pointer; user-select:none; position:relative; background:#fff; transition:all .15s; }
+  .store-tile { border:1px solid var(--border2); border-radius:var(--radius-lg); padding:12px 14px; cursor:pointer; user-select:none; position:relative; background:var(--surface); transition:all .15s; }
   .store-tile:hover { border-color:var(--blue); background:var(--blue-bg); }
   .store-tile.selected { border-color:var(--blue); border-width:2px; background:var(--blue-bg); }
-  .st-check { position:absolute; top:10px; right:10px; width:18px; height:18px; border-radius:50%; border:1.5px solid var(--border2); display:flex; align-items:center; justify-content:center; font-size:10px; background:#fff; }
+  .st-check { position:absolute; top:10px; right:10px; width:18px; height:18px; border-radius:50%; border:1.5px solid var(--border2); display:flex; align-items:center; justify-content:center; font-size:10px; background:var(--surface); }
   .store-tile.selected .st-check { background:var(--blue); border-color:var(--blue); color:#fff; }
   .st-code { font-size:10px; font-weight:600; color:var(--muted); font-family:monospace; }
   .st-name { font-size:12px; font-weight:600; margin-top:3px; margin-right:22px; line-height:1.3; }
@@ -156,7 +212,7 @@
   .cap-table th { font-size:10px; font-weight:600; color:#fff; padding:7px 9px; text-align:center; border-bottom:1px solid rgba(255,255,255,.15); background:#1A3A5C; white-space:nowrap; }
   .cap-table th.frozen { position:sticky; left:0; z-index:2; text-align:left; background:#243B55; }
   .cap-table td { padding:0; border-bottom:1px solid var(--border); border-right:1px solid var(--border); }
-  .cap-table td.label-cell { padding:5px 10px; position:sticky; left:0; background:#fff; z-index:1; border-right:2px solid var(--border2); white-space:nowrap; }
+  .cap-table td.label-cell { padding:5px 10px; position:sticky; left:0; background:var(--surface); z-index:1; border-right:2px solid var(--border2); white-space:nowrap; }
   .cap-input { width:100%; border:none; background:transparent; text-align:center; font-size:11px; font-family:monospace; color:var(--text); padding:5px 3px; outline:none; min-width:60px; cursor:pointer; }
   .cap-input:focus { background:var(--blue-bg); color:var(--blue); font-weight:600; border-radius:4px; }
   .cap-input:hover:not(:focus) { background:var(--bg); }
@@ -176,25 +232,30 @@
 
   /* Toggle */
   .toggle-group { display:flex; border:1px solid var(--border2); border-radius:var(--radius); overflow:hidden; }
-  .topt { padding:6px 14px; font-size:11px; font-weight:500; cursor:pointer; background:#fff; border:none; color:var(--muted); transition:all .15s; }
+  .topt { padding:6px 14px; font-size:11px; font-weight:500; cursor:pointer; background:var(--surface); border:none; color:var(--muted); transition:all .15s; }
   .topt.active { background:var(--blue); color:#fff; }
 
   /* New brand modal */
   .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:200; align-items:center; justify-content:center; }
   .modal-bg.open { display:flex; }
-  .modal { background:#fff; border-radius:var(--radius-lg); padding:24px; width:520px; max-width:94vw; max-height:90vh; overflow-y:auto; box-shadow:0 8px 40px rgba(0,0,0,.18); }
+  .modal { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:24px; width:520px; max-width:94vw; max-height:90vh; overflow-y:auto; box-shadow:var(--shadow-lg); }
   .modal-title { font-size:16px; font-weight:600; margin-bottom:4px; }
   .modal-sub { font-size:12px; color:var(--muted); margin-bottom:18px; }
   .store-check-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:6px; }
   .store-chk { display:flex; align-items:center; gap:7px; padding:7px 10px; border:1px solid var(--border2); border-radius:var(--radius); cursor:pointer; font-size:12px; transition:all .15s; }
   .store-chk:hover { background:var(--bg); }
   .store-chk.sel { border-color:var(--blue); background:var(--blue-bg); color:var(--blue); font-weight:500; }
-  .chkbox { width:16px; height:16px; border-radius:4px; border:1.5px solid var(--border2); display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0; background:#fff; }
+  .chkbox { width:16px; height:16px; border-radius:4px; border:1.5px solid var(--border2); display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0; background:var(--surface); }
   .store-chk.sel .chkbox { background:var(--blue); border-color:var(--blue); color:#fff; }
   .divider { height:1px; background:var(--border); margin:16px 0; }
 </style>
 </head>
 <body>
+<script>
+  // Apply saved theme before paint to avoid flash
+  (function(){ try { var t=localStorage.getItem('de_theme')||'light'; document.documentElement.setAttribute('data-theme',t); } catch(e){} })();
+</script>
+<a href="#main-content" class="skip-link">Skip to main content</a>
 <div class="app">
 
 <!-- PROGRESS BAR (shown during API load) -->
@@ -206,6 +267,7 @@
 <div class="topbar">
   <div class="logo">Designer Eyes <span>Replenishment</span><sub>v6.4</sub></div>
   <div class="topbar-right">
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
     <button class="btn btn-secondary btn-sm" onclick="showTab('settings')">⚙ Settings</button>
   </div>
 </div>
@@ -223,7 +285,7 @@
   <button class="tab"        id="tab-settings"        onclick="showTab('settings')" style="display:none">Settings</button>
 </div>
 
-<div class="content">
+<div class="content" id="main-content">
 
 <!-- STORE SELECTION -->
 <!-- EXCEPTIONS -->
@@ -267,6 +329,8 @@
             <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Store Code</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Store Name</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Variant SKU</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Brand</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Type</th>
             <th style="text-align:right;padding:8px 12px"></th>
           </tr>
         </thead>
@@ -331,8 +395,9 @@
 
   <!-- Run summary -->
   <div class="card" id="runSummary" style="display:none">
-    <div class="card-title">Run summary</div>
-    <div class="row row4" id="runMetrics" style="margin-bottom:14px"></div>
+    <div class="card-title">Run summary <span id="runStamp" style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px"></span></div>
+    <div class="row row3" id="runMetrics" style="margin-bottom:14px"></div>
+    <div id="runStoreBreakdown" style="margin-bottom:14px"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-navy btn-sm" onclick="exportNAV()">📋 Export NAV (.xlsx)</button>
       <button class="btn btn-secondary btn-sm" onclick="exportCSV()">CSV</button>
@@ -341,8 +406,11 @@
 
   <!-- Recommendations (inline) -->
   <div class="card" id="recoSection" style="display:none">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div class="card-title" style="margin-bottom:0">Recommendations</div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">Recommendations</div>
+        <div style="font-size:12px;color:var(--muted);max-width:560px;line-height:1.5">Per-store transfer suggestions from the warehouse. Click any store header to expand. Each row shows the SKU, current store on-hand, after-transfer qty, warehouse stock, recommended units to send (QTY), and signals (🔥 hot · ⚠ low · 📈 seasonal).</div>
+      </div>
       <div class="filter-row" style="margin-bottom:0;flex-wrap:wrap">
         <select id="sl-rfBrand"  onchange="renderRecos('sl-')"><option value="">All brands</option></select>
         <select id="sl-rfType"   onchange="renderRecos('sl-')"><option value="">All types</option></select>
@@ -356,6 +424,13 @@
         <button class="btn btn-navy btn-sm" onclick="exportNAV()">📋 Export NAV</button>
         <button class="btn btn-secondary btn-sm" onclick="exportCSV()">CSV</button>
       </div>
+    </div>
+    <!-- Store header pill legend -->
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-bottom:10px;padding:8px 12px;background:var(--surface-2);border-radius:var(--radius)">
+      <span><span class="pill p-info">N lines</span> = SKUs to transfer</span>
+      <span><span class="pill p-ok">N units</span> = units leaving WH</span>
+      <span><span class="pill p-gray">before → <strong>after</strong></span> = total store on-hand for these SKUs</span>
+      <span><span class="pill p-navy">📋 NAV</span> = export this store only</span>
     </div>
     <div id="sl-recoList"></div>
   </div>
@@ -404,7 +479,7 @@
       <div style="position:relative;height:230px"><canvas id="cUnits"></canvas></div>
     </div>
   </div>
-  <div class="row row2" style="margin-bottom:14px">
+  <div class="row" style="margin-bottom:14px">
     <div class="card" style="margin-bottom:0">
       <div class="card-title">90d velocity vs WH stock — by brand</div>
       <div class="legend">
@@ -413,9 +488,15 @@
       </div>
       <div style="position:relative;height:230px"><canvas id="cVel"></canvas></div>
     </div>
+  </div>
+  <div class="row row2" style="margin-bottom:14px">
     <div class="card" style="margin-bottom:0">
-      <div class="card-title">Top understocked combos</div>
-      <div style="overflow-x:auto" id="understocked"></div>
+      <div class="card-title">Replenish-ready combos <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px">cap &gt; 0 · WH &gt; 0 · velocity &gt; 0</span></div>
+      <div style="overflow-x:auto" id="understockedReady"></div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">Stockout — WH empty <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px">cap &gt; 0 · WH = 0 · velocity &gt; 0</span></div>
+      <div style="overflow-x:auto" id="understockedEmpty"></div>
     </div>
   </div>
   <div class="card">
@@ -518,9 +599,10 @@
 <div class="panel" id="panel-capacity">
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
     <button class="btn btn-orange btn-sm" onclick="openNewBrand()">+ Add brand to stores</button>
-    <select id="capFType" onchange="renderCap()" style="width:auto"><option value="all">All types</option><option>Sunglasses</option><option>Optical</option><option>Kids</option></select>
-    <select id="capFBrand" onchange="renderCap()" style="width:auto"><option value="">All brands</option></select>
-    <span style="font-size:11px;color:var(--muted)">Click any cell to edit · Tab/Enter/arrows to navigate</span>
+    <!-- Local Capacity filters hidden — filtering centralized to Inventory tab -->
+    <select id="capFType" onchange="renderCap()" style="display:none"><option value="all" selected>All types</option></select>
+    <select id="capFBrand" onchange="renderCap()" style="display:none"><option value="" selected>All brands</option></select>
+    <span style="font-size:11px;color:var(--muted)">Filters controlled in Inventory tab · Click any cell to edit · Tab/Enter/arrows to navigate</span>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
       <span id="capBadge" style="display:none" class="pill p-warn">0 changes</span>
       <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import capacity from Excel">⬆ Import<input type="file" id="capFile" accept=".xlsx,.xls,.csv" onchange="importCapFromFile(this)" style="display:none"></label>
@@ -1084,19 +1166,34 @@ function renderExcList(){
     if(cur) sel.value=cur;
   }
   if(!S.exceptions||!S.exceptions.size){
-    body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--hint);font-size:12px">No exceptions yet. Import a file or add one above.</td></tr>';
+    body.innerHTML='<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--hint);font-size:12px">No exceptions yet. Import a file or add one above.</td></tr>';
     return;
   }
   const storeNameById={};(STORES||[]).forEach(s=>storeNameById[s.id]=s.short);
+  // Build SKU -> {brand, type} lookup from catalog (lowercase SKU keys to match exceptions)
+  const skuMeta={};
+  Object.values(S.raw?.itemMap||{}).forEach(v=>{
+    if(v && v.variantSku){
+      const k=String(v.variantSku).toLowerCase();
+      if(!skuMeta[k]) skuMeta[k]={brand:v.brand||'',type:v.type||''};
+    }
+  });
   // Sort by store ID then SKU for stable display
   const rows=[...S.exceptions].map(k=>{const[sid,sku]=k.split('|');return{sid,sku,key:k};})
     .sort((a,b)=>a.sid.localeCompare(b.sid)||a.sku.localeCompare(b.sku));
-  body.innerHTML=rows.map(r=>`<tr style="border-top:1px solid var(--border)">
-    <td style="padding:8px 12px;font-family:monospace;font-size:12px">${r.sid}</td>
-    <td style="padding:8px 12px">${storeNameById[r.sid]||'<span style="color:var(--hint)">(unknown)</span>'}</td>
-    <td style="padding:8px 12px;font-family:monospace">${r.sku}</td>
-    <td style="padding:6px 12px;text-align:right"><button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:11px" onclick="removeExc('${r.sid}','${r.sku}')">✕ Remove</button></td>
-  </tr>`).join('');
+  body.innerHTML=rows.map(r=>{
+    const meta=skuMeta[r.sku]||{brand:'',type:''};
+    const brandCell=meta.brand?hesc(meta.brand):'<span style="color:var(--hint);font-size:11px">—</span>';
+    const typeCell=meta.type?hesc(meta.type):'<span style="color:var(--hint);font-size:11px">—</span>';
+    return `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:12px">${r.sid}</td>
+      <td style="padding:8px 12px">${storeNameById[r.sid]||'<span style="color:var(--hint)">(unknown)</span>'}</td>
+      <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace">${r.sku}</td>
+      <td style="padding:8px 12px">${brandCell}</td>
+      <td style="padding:8px 12px;color:var(--muted)">${typeCell}</td>
+      <td style="padding:6px 12px;text-align:right"><button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:11px" onclick="removeExc('${r.sid}','${r.sku}')">✕ Remove</button></td>
+    </tr>`;
+  }).join('');
 }
 function addExcManual(){
   const sid=document.getElementById('excAddStore').value.trim();
@@ -1269,11 +1366,54 @@ function runRun(){
   const r=S.activeRecos,sc=new Set(r.map(x=>x.storeId)).size;
   // Show run summary
   document.getElementById('runSummary').style.display='block';
+  const totalUnits=r.reduce((a,b)=>a+b.transferQty,0);
+  const whBefore=(S.wh||[]).reduce((a,w)=>a+(w.whQty||0),0);
+  const whAfter=Math.max(0,whBefore-totalUnits);
+  // Stamp current priority + timestamp so user can confirm a fresh run
+  const prioLabel=(S.priority==='velocity')?'Velocity':(S.priority==='manual')?'Manual':'Urgency';
+  const stamp=document.getElementById('runStamp');
+  if(stamp) stamp.textContent='· Priority: '+prioLabel+' · '+new Date().toLocaleTimeString();
   document.getElementById('runMetrics').innerHTML=`
     <div class="metric-card"><div class="metric-val">${sc}</div><div class="metric-lbl">Stores</div></div>
     <div class="metric-card"><div class="metric-val">${r.length}</div><div class="metric-lbl">NAV lines</div></div>
-    <div class="metric-card"><div class="metric-val">${r.reduce((a,b)=>a+b.transferQty,0)}</div><div class="metric-lbl">Total units</div></div>
-    <div class="metric-card"><div class="metric-val">${r.filter(x=>x.isHot).length}</div><div class="metric-lbl">Hot sellers</div></div>`;
+    <div class="metric-card"><div class="metric-val">${totalUnits}</div><div class="metric-lbl">Total units</div></div>
+    <div class="metric-card"><div class="metric-val">${r.filter(x=>x.isHot).length}</div><div class="metric-lbl">Hot sellers</div></div>
+    <div class="metric-card"><div class="metric-val">${whBefore.toLocaleString()}</div><div class="metric-lbl">WH qty — before</div></div>
+    <div class="metric-card"><div class="metric-val" style="color:var(--amber)">${whAfter.toLocaleString()}</div><div class="metric-lbl">WH qty — after <span style="color:var(--red);font-weight:600">−${totalUnits}</span></div></div>`;
+  // Per-store breakdown — this is what changes between priority modes
+  const byStore={};
+  r.forEach(x=>{
+    if(!byStore[x.storeId]) byStore[x.storeId]={name:x.store,storeId:x.storeId,lines:0,units:0};
+    byStore[x.storeId].lines++;
+    byStore[x.storeId].units+=x.transferQty;
+  });
+  // Order rows by current priority (so visual order matches priority list)
+  const prioOrder=(typeof getStorePriorityOrder==='function'?getStorePriorityOrder():[]).filter(id=>byStore[id]);
+  const remaining=Object.keys(byStore).filter(id=>!prioOrder.includes(id));
+  const orderedIds=[...prioOrder,...remaining];
+  const bdEl=document.getElementById('runStoreBreakdown');
+  if(bdEl){
+    if(!orderedIds.length){bdEl.innerHTML='';}
+    else {
+      bdEl.innerHTML=`
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px">Per-store allocation (${prioLabel} priority)</div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th style="width:40px">#</th><th>Store</th><th style="text-align:right">Lines</th><th style="text-align:right">Units</th><th style="text-align:right">% of total</th></tr></thead>
+          <tbody>${orderedIds.map((sid,i)=>{
+            const sd=byStore[sid];
+            const st=STORES.find(s=>s.id===sid);
+            const pct=totalUnits?Math.round(sd.units/totalUnits*100):0;
+            return `<tr>
+              <td style="color:var(--muted);font-weight:600">${i+1}</td>
+              <td><strong>${hesc(st?.short||sd.name||sid)}</strong> <span style="color:var(--muted);font-size:10px">${sid}</span></td>
+              <td style="text-align:right">${sd.lines}</td>
+              <td style="text-align:right;font-weight:600">${sd.units}</td>
+              <td style="text-align:right">${pct}%<div class="prog" style="margin-top:2px"><div class="prog-fill" style="width:${pct}%;background:var(--blue)"></div></div></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`;
+    }
+  }
   // Show inline recommendations
   const recoSec=document.getElementById('recoSection');
   if(recoSec){
@@ -1294,6 +1434,20 @@ function runRun(){
     if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
   },100);
 }
+
+// Theme toggle (light/dark)
+function toggleTheme(){
+  var cur=document.documentElement.getAttribute('data-theme')||'light';
+  var next=cur==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',next);
+  try{localStorage.setItem('de_theme',next);}catch(e){}
+  var btn=document.getElementById('themeToggle');
+  if(btn) btn.textContent=next==='dark'?'☀':'🌙';
+  // Re-render charts so they pick up new theme colors
+  if(typeof updateDash==='function' && document.getElementById('panel-dashboard')?.classList.contains('active')) updateDash();
+}
+// Initialize toggle icon on load
+(function(){var t=document.documentElement.getAttribute('data-theme')||'light';var b=document.getElementById('themeToggle');if(b) b.textContent=t==='dark'?'☀':'🌙';})();
 
 // Tab navigation
 function showTab(t){
@@ -1499,8 +1653,12 @@ function renderUnderstocked(fd){
     const wk=(d.sku||k);
     if(!whSeen.has(wk)){combos[k].wh+=(d.whQty||0);whSeen.add(wk);}
   });
-  const rows=Object.values(combos).filter(c=>c.cap>0).map(c=>({...c,fill:Math.round(c.qty/c.cap*100),gap:Math.max(0,c.vel-c.qty)})).sort((a,b)=>a.fill-b.fill).slice(0,7);
-  document.getElementById('understocked').innerHTML=`<table><thead><tr><th>Brand + type</th><th>Fill %</th><th>Store qty</th><th>WH</th><th>Gap</th></tr></thead><tbody>${rows.map(r=>`<tr><td><strong>${r.brand}</strong><br><span style="font-size:10px;color:var(--muted)">${r.type}</span></td><td><span class="pill ${r.fill<30?'p-err':r.fill<60?'p-warn':'p-ok'}">${r.fill}%</span><div class="prog"><div class="prog-fill" style="width:${r.fill}%;background:${r.fill<30?'#E24B4A':r.fill<60?'#EF9F27':'#639922'}"></div></div></td><td>${r.qty}</td><td style="color:var(--green)">${r.wh}</td><td><span class="pill ${r.gap>0?'p-warn':'p-ok'}">${r.gap>0?'+'+r.gap:'OK'}</span></td></tr>`).join('')}</tbody></table>`;
+  const enriched=Object.values(combos).map(c=>({...c,fill:Math.round(c.qty/Math.max(c.cap,1)*100),gap:Math.max(0,c.vel-c.qty)}));
+  const ready=enriched.filter(c=>c.cap>0&&c.wh>0&&c.vel>0).sort((a,b)=>a.fill-b.fill).slice(0,7);
+  const empty=enriched.filter(c=>c.cap>0&&c.wh===0&&c.vel>0).sort((a,b)=>b.gap-a.gap).slice(0,7);
+  const renderTbl=rows=>rows.length?`<table><thead><tr><th>Brand + type</th><th>Fill %</th><th>Store qty</th><th>WH</th><th>Gap</th></tr></thead><tbody>${rows.map(r=>`<tr><td><strong>${r.brand}</strong><br><span style="font-size:10px;color:var(--muted)">${r.type}</span></td><td><span class="pill ${r.fill<30?'p-err':r.fill<60?'p-warn':'p-ok'}">${r.fill}%</span><div class="prog"><div class="prog-fill" style="width:${r.fill}%;background:${r.fill<30?'#E24B4A':r.fill<60?'#EF9F27':'#639922'}"></div></div></td><td>${r.qty}</td><td style="color:var(--green)">${r.wh}</td><td><span class="pill ${r.gap>0?'p-warn':'p-ok'}">${r.gap>0?'+'+r.gap:'OK'}</span></td></tr>`).join('')}</tbody></table>`:`<div style="padding:14px;text-align:center;color:var(--muted);font-size:11px">No combos match this criteria</div>`;
+  document.getElementById('understockedReady').innerHTML=renderTbl(ready);
+  document.getElementById('understockedEmpty').innerHTML=renderTbl(empty);
 }
 
 // Simulator
@@ -1975,27 +2133,35 @@ function renderRecos(prefix=''){
   const byStore={};r.forEach(x=>{if(!byStore[x.storeId]) byStore[x.storeId]={name:x.store,items:[]};byStore[x.storeId].items.push(x);});
   const d=g('recoList');if(!d) return;
   if(!r.length){d.innerHTML='<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No recommendations match.</div>';return;}
-  d.innerHTML=Object.entries(byStore).map(([sid,st])=>`
+  d.innerHTML=Object.entries(byStore).map(([sid,st])=>{
+    const sentUnits=st.items.reduce((a,b)=>a+b.transferQty,0);
+    const qtyBefore=st.items.reduce((a,b)=>a+(b.storeQty||0),0);
+    const qtyAfter=qtyBefore+sentUnits;
+    return `
     <div class="reco-card">
       <div class="reco-hdr" onclick="toggleReco('${sid}')">
         <div style="font-weight:600;font-size:13px">${sid} — ${st.name}</div>
         <div style="display:flex;gap:7px;align-items:center">
           <span class="pill p-info">${st.items.length} lines</span>
-          <span class="pill p-ok">${st.items.reduce((a,b)=>a+b.transferQty,0)} units</span>
+          <span class="pill p-ok">${sentUnits} units</span>
+          <span class="pill p-gray" title="Total store on-hand across these SKUs (before → after)">${qtyBefore} → <strong style="color:var(--green)">${qtyAfter}</strong></span>
           <span class="pill p-navy" style="cursor:pointer" onclick="event.stopPropagation();exportNAVSingle('${sid}')">📋 NAV</span>
           <span id="arr-${sid}" style="color:var(--muted);font-size:12px">▶</span>
         </div>
       </div>
       <div class="reco-body" id="body-${sid}">
-        <table><thead><tr><th>SKU (NAV No.)</th><th>Brand · Type</th><th>90d vel</th><th>Store qty</th><th>WH qty</th><th>QTY</th><th>Signals</th></tr></thead>
+        <table><thead><tr><th>SKU (NAV No.)</th><th>Brand · Type</th><th>90d vel</th><th>Store qty</th><th>After</th><th>WH qty</th><th>QTY</th><th>Signals</th></tr></thead>
         <tbody>${st.items.map(r=>`<tr>
           <td style="font-family:monospace;font-size:11px">${hesc(r.sku)}</td>
-          <td>${hesc(r.brand)} · ${hesc(r.type)}</td><td>${r.velocity90}</td><td>${r.storeQty}</td><td>${r.whQty}</td>
+          <td>${hesc(r.brand)} · ${hesc(r.type)}</td><td>${r.velocity90}</td><td>${r.storeQty}</td>
+          <td style="color:var(--green);font-weight:600">${(r.storeQty||0)+r.transferQty}</td>
+          <td>${r.whQty}</td>
           <td><span class="pill ${r.transferQty>1?'p-err':'p-ok'}" style="font-weight:700">${r.transferQty}</span></td>
           <td>${r.signals.map(s=>s==='hot'?'<span class="pill p-ok">🔥 Hot</span>':s==='low'?'<span class="pill p-warn">⚠ Low stock</span>':'<span class="pill p-info">📈 Seasonal</span>').join(' ')}</td>
         </tr>`).join('')}</tbody></table>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 function toggleReco(sid){const b=document.getElementById('body-'+sid),a=document.getElementById('arr-'+sid);a.textContent=b.classList.toggle('open')?'▼':'▶';}
 
@@ -2022,22 +2188,22 @@ function renderNAVPreview(prefix=''){
   const navPrev=g('navPreview');if(!navPrev) return;
   if(!r.length){navPrev.innerHTML='<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">No recommendations for this store.</div>';return;}
   navPrev.innerHTML=`
-    <div style="background:#F0F6FC;border:1px solid #BDD7EE;border-radius:8px;overflow:hidden">
-      <div style="background:#1F4E79;color:#fff;padding:8px 14px;font-size:12px;font-weight:600">${navLoc} · ${r.length} lines · ${r.reduce((a,b)=>a+b.transferQty,0)} units · ${new Date().toLocaleDateString()}</div>
-      <div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;min-width:100%">
-        <thead><tr style="background:#1F4E79;color:#fff">${['ITEM','No. (SKU)','Action Message','Accept','Description','Location Code','Original QTY','QTY','Brand','Type','Signal'].map((h,i)=>`<th style="padding:6px 9px;font-weight:500;border:1px solid #164069;${i>=8?'background:#2E6096':''}">${h}</th>`).join('')}</tr></thead>
-        <tbody>${r.map((x,i)=>`<tr style="background:${i%2?'#F0F6FC':'#fff'}">
-          <td style="padding:5px 9px;border:1px solid #BDD7EE">Item</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;font-family:monospace">${hesc(x.sku)}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center">New</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center;color:#3B6D11;font-weight:700">Yes</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hesc(x.desc)}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE">${hesc(navLoc)}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center"></td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;text-align:center;font-weight:700;color:${x.transferQty>1?'#A32D2D':'inherit'}">${x.transferQty}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB">${hesc(x.brand)}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB">${hesc(x.type)}</td>
-          <td style="padding:5px 9px;border:1px solid #BDD7EE;background:#EBF3FB;font-size:10px">${hesc(x.signals.join('+'))}</td>
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;overflow:hidden;box-shadow:var(--shadow-sm)">
+      <div style="background:var(--navy);color:#fff;padding:8px 14px;font-size:12px;font-weight:600">${navLoc} · ${r.length} lines · ${r.reduce((a,b)=>a+b.transferQty,0)} units · ${new Date().toLocaleDateString()}</div>
+      <div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;min-width:100%;color:var(--text)">
+        <thead><tr style="background:var(--navy);color:#fff">${['ITEM','No. (SKU)','Action Message','Accept','Description','Location Code','Original QTY','QTY','Brand','Type','Signal'].map((h,i)=>`<th style="padding:6px 9px;font-weight:500;border:1px solid rgba(255,255,255,0.15);${i>=8?'background:rgba(255,255,255,0.08)':''}">${h}</th>`).join('')}</tr></thead>
+        <tbody>${r.map((x,i)=>`<tr style="background:${i%2?'var(--surface-2)':'var(--surface)'}">
+          <td style="padding:5px 9px;border:1px solid var(--border)">Item</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);font-family:'JetBrains Mono',monospace">${hesc(x.sku)}</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);text-align:center">New</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);text-align:center;color:var(--green);font-weight:700">Yes</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hesc(x.desc)}</td>
+          <td style="padding:5px 9px;border:1px solid var(--border)">${hesc(navLoc)}</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);text-align:center"></td>
+          <td style="padding:5px 9px;border:1px solid var(--border);text-align:center;font-weight:700;color:${x.transferQty>1?'var(--red)':'inherit'}">${x.transferQty}</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);background:var(--blue-bg);color:var(--text)">${hesc(x.brand)}</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);background:var(--blue-bg);color:var(--text)">${hesc(x.type)}</td>
+          <td style="padding:5px 9px;border:1px solid var(--border);background:var(--blue-bg);color:var(--text);font-size:10px">${hesc(x.signals.join('+'))}</td>
         </tr>`).join('')}</tbody>
       </table></div>
     </div>
@@ -2763,26 +2929,54 @@ async function shopifyFetch(endpoint){
   if(!proxy) throw new Error('Enter your Vercel proxy URL first');
   const url=proxy+'/api/shopify?endpoint='+encodeURIComponent(endpoint);
   const headers={'X-DE-Domain':domain,'X-DE-Token':token,'X-DE-Auth':btoa(domain+':'+token)};
-  for(let attempt=0;attempt<5;attempt++){
+  const MAX=8;
+  for(let attempt=0;attempt<MAX;attempt++){
     if(attempt>0){
-      const wait=attempt*2000;
-      clog('    retrying in '+wait+'ms (attempt '+(attempt+1)+')...');
+      const wait=Math.min(30000,1500*Math.pow(1.7,attempt));
+      clog('    retrying in '+Math.round(wait)+'ms (attempt '+(attempt+1)+'/'+MAX+')...');
       await new Promise(r=>setTimeout(r,wait));
     }
-    const r=await fetch(url,{method:'GET',headers});
+    let r;
+    try { r=await fetch(url,{method:'GET',headers}); }
+    catch(netErr){
+      // Network failure (DNS, abort, offline) — retry
+      clog('    network error: '+netErr.message+' — retrying...');
+      if(attempt===MAX-1) throw new Error('Network error after '+MAX+' attempts: '+netErr.message);
+      continue;
+    }
+    // 429 rate limit
     if(r.status===429){
       const wait=3000+attempt*2000;
       clog('    rate limited (429) — waiting '+wait+'ms...');
       await new Promise(r=>setTimeout(r,wait));
       continue;
     }
-    if(!r.ok){
-      const err=await r.json().catch(()=>({error:'HTTP '+r.status}));
-      throw new Error('Shopify API error '+r.status+': '+(err.error||JSON.stringify(err)));
+    // 5xx upstream/proxy/CDN errors (502/503/504 commonly come from Cloudflare/Vercel as HTML)
+    if(r.status>=500 && r.status<600){
+      const txt=await r.text().catch(()=>'');
+      const snippet=txt ? txt.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,120) : '';
+      clog('    upstream '+r.status+(snippet?' ('+snippet+')':'')+' — will retry');
+      if(attempt===MAX-1) throw new Error('Upstream error '+r.status+' after '+MAX+' attempts'+(snippet?': '+snippet:''));
+      continue;
     }
-    return await r.json();
+    if(!r.ok){
+      const txt=await r.text().catch(()=>'');
+      let msg='HTTP '+r.status;
+      try { const j=JSON.parse(txt); msg=j.error||j.errors||JSON.stringify(j); } catch(_){ if(txt) msg=txt.slice(0,200); }
+      throw new Error('Shopify API error '+r.status+': '+msg);
+    }
+    // 2xx — try parse JSON safely
+    const txt=await r.text();
+    if(!txt||!txt.trim()) return null;
+    try { return JSON.parse(txt); }
+    catch(parseErr){
+      const snippet=txt.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,120);
+      clog('    invalid JSON in 200 response ('+snippet+') — retrying');
+      if(attempt===MAX-1) throw new Error('Invalid JSON after '+MAX+' attempts: '+snippet);
+      continue;
+    }
   }
-  throw new Error('Failed after 5 attempts (rate limited)');
+  throw new Error('Failed after '+MAX+' attempts');
 }
 
 async function testConn(){
