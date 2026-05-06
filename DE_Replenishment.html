@@ -2439,19 +2439,27 @@ function renderCap(){
     .sort((a,b)=>a.b.localeCompare(b.b)||a.t.localeCompare(b.t));
   // Filter visible stores by Inventory store filter
   const visibleStores=invStores.length?STORES.filter(st=>invStores.includes(st.id)):STORES;
-  let html=`<table class="cap-table"><thead><tr><th class="frozen">Brand / Type</th>${visibleStores.map(st=>`<th>${st.short}<br><span style="font-size:9px;opacity:.6">${st.id}</span></th>`).join('')}</tr></thead><tbody>`;
+  let html=`<table class="cap-table"><thead><tr><th class="frozen">Brand / Type</th>${visibleStores.map(st=>`<th>${st.short}<br><span style="font-size:9px;opacity:.6">${st.id}</span></th>`).join('')}<th style="background:var(--navy);text-align:center">Total</th></tr></thead><tbody>`;
   let lastCapBrand='';
+  const colTotals=visibleStores.map(()=>0);
+  let grandTotal=0;
   comboPairs.forEach(({b,t})=>{
     const isFirst=b!==lastCapBrand,isNew=S.newBrands.has(b);
     lastCapBrand=b;
     html+=`<tr><td class="label-cell">${isFirst?`<span style="font-size:11px;font-weight:600;color:${isNew?'#6B21A8':'var(--text)'}">${b}${isNew?' <span style="font-size:9px;padding:1px 5px;border-radius:10px;background:#F3E8FF;color:#6B21A8">NEW</span>':''}</span><br>`:''}<span style="font-size:10px;color:var(--muted)">${t}</span></td>`;
-    visibleStores.forEach(st=>{
+    let rowTotal=0;
+    visibleStores.forEach((st,i)=>{
       const carries=S.STORE_BRANDS[st.id]?.has(b);
-      if(carries){const v=S.CAP[st.id]?.[b]?.[t]??0;const orig=S.ORIG[st.id]?.[b]?.[t];const cls=v!==orig?'cap-input changed':v===0?'cap-input zero':'cap-input';html+=`<td><input class="${cls}" type="number" min="0" max="999" value="${v}" data-store="${st.id}" data-brand="${b}" data-type="${t}" onchange="onCapChange(this)" onfocus="this.select()"></td>`;}
+      if(carries){const v=S.CAP[st.id]?.[b]?.[t]??0;rowTotal+=v;colTotals[i]+=v;const orig=S.ORIG[st.id]?.[b]?.[t];const cls=v!==orig?'cap-input changed':v===0?'cap-input zero':'cap-input';html+=`<td><input class="${cls}" type="number" min="0" max="999" value="${v}" data-store="${st.id}" data-brand="${b}" data-type="${t}" onchange="onCapChange(this)" onfocus="this.select()"></td>`;}
       else html+=`<td style="text-align:center"><button style="font-size:10px;padding:2px 7px;border:1px dashed var(--border2);border-radius:5px;background:none;color:var(--hint);cursor:pointer" onclick="addBrandToStore('${b}','${st.id}')">+</button></td>`;
     });
+    grandTotal+=rowTotal;
+    const rowKey=`${b}|||${t}`.replace(/[^a-zA-Z0-9|]/g,'_');
+    html+=`<td class="cap-row-total" data-rowkey="${rowKey}" style="text-align:center;font-weight:600;font-family:'JetBrains Mono',monospace;background:var(--surface-2);color:var(--text);border-left:2px solid var(--border2)">${rowTotal}</td>`;
     html+='</tr>';
   });
+  // Footer row with column totals
+  html+=`<tfoot><tr style="background:var(--surface-2);border-top:2px solid var(--border2)"><td class="label-cell" style="background:var(--surface-2);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Total</td>${colTotals.map((v,i)=>`<td class="cap-col-total" data-storeid="${visibleStores[i].id}" style="text-align:center;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)">${v}</td>`).join('')}<td id="capGrandTotal" style="text-align:center;font-weight:700;font-family:'JetBrains Mono',monospace;background:var(--blue-bg);color:var(--blue);border-left:2px solid var(--border2)">${grandTotal}</td></tr></tfoot>`;
   html+='</tbody></table>';
   document.getElementById('capWrap').innerHTML=html;
   // Total reflects visible (filtered) scope; changed count is global
@@ -2466,9 +2474,30 @@ function onCapChange(input){
   const{store,brand,type}=input.dataset;const v=Math.max(0,parseInt(input.value)||0);S.CAP[store][brand][type]=v;
   const orig=S.ORIG[store]?.[brand]?.[type];input.className=v!==orig?'cap-input changed':v===0?'cap-input zero':'cap-input';
   S.capChanges++;document.getElementById('capBadge').style.display='inline-block';document.getElementById('capBadge').textContent=`${S.capChanges} change${S.capChanges>1?'s':''}`;
+  // Live-update row/column/grand totals without full re-render (preserves focus)
+  updateCapTotals();
   applyCapToData();
   saveCapToLocalStorage();
   if(DATA.length) renderInv();
+}
+function updateCapTotals(){
+  const wrap=document.getElementById('capWrap');if(!wrap) return;
+  const inputs=wrap.querySelectorAll('input.cap-input,input.cap-input.changed,input.cap-input.zero');
+  // Row totals: sum inputs in same <tr>
+  wrap.querySelectorAll('tr').forEach(tr=>{
+    const totCell=tr.querySelector('.cap-row-total');if(!totCell) return;
+    let sum=0;
+    tr.querySelectorAll('input[data-store]').forEach(inp=>{sum+=parseInt(inp.value)||0;});
+    totCell.textContent=sum;
+  });
+  // Column totals + grand total
+  let grand=0;
+  wrap.querySelectorAll('.cap-col-total').forEach(cell=>{
+    const sid=cell.dataset.storeid;let sum=0;
+    wrap.querySelectorAll(`input[data-store="${sid}"]`).forEach(inp=>{sum+=parseInt(inp.value)||0;});
+    cell.textContent=sum;grand+=sum;
+  });
+  const g=document.getElementById('capGrandTotal');if(g) g.textContent=grand;
 }
 function addBrandToStore(brand,storeId){if(!S.CAP[storeId][brand]) S.CAP[storeId][brand]={};TYPES.forEach(t=>{if(S.CAP[storeId][brand][t]===undefined) S.CAP[storeId][brand][t]=0;});S.STORE_BRANDS[storeId].add(brand);renderCap();}
 function resetCap(){if(!confirm('Reset all changes? This permanently clears saved capacity edits.')) return;STORES.forEach(st=>BRANDS.forEach(b=>TYPES.forEach(t=>{if(S.ORIG[st.id]?.[b]?.[t]!==undefined) S.CAP[st.id][b][t]=S.ORIG[st.id][b][t];})));S.newBrands.forEach(b=>{BRANDS=BRANDS.filter(x=>x!==b);STORES.forEach(st=>{delete S.CAP[st.id][b];S.STORE_BRANDS[st.id].delete(b);});});S.newBrands.clear();S.capChanges=0;document.getElementById('capBadge').style.display='none';try{localStorage.removeItem('de_capacity_v1');localStorage.removeItem('de_capacity_saved_at');}catch(e){}applyCapToData();renderCap();populateCapBrandFilter();if(DATA.length) renderInv();}
