@@ -1,9 +1,0 @@
-{
-  "supabase": {
-    "url": "https://zoqihptkwurpqenpjgfw.supabase.co",
-    "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvcWlocHRrd3VycHFlbnBqZ2Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MjA0ODgsImV4cCI6MjA5MDM5NjQ4OH0.Zts7u41SIN0HQ5G7sXb-QIhbTGQSctE--lHKa4Fui-Q"
-  },
-  "shopify": {
-    "proxyUrl": "https://de-shopify-proxy.vercel.app"
-  }
-}

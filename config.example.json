@@ -1,0 +1,9 @@
+{
+  "supabase": {
+    "url": "https://YOUR-PROJECT.supabase.co",
+    "anonKey": "eyJ...your-anon-public-key..."
+  },
+  "shopify": {
+    "proxyUrl": "https://your-vercel-proxy.vercel.app"
+  }
+}

@@ -3,3 +3,12 @@ Secretos.txt
 .claude/
 *.zip
 DE_Replenishment_Package.zip
+# Local config (use config.example.json as template)
+config.json
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*.orig
+node_modules/
