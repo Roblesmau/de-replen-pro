@@ -19,6 +19,29 @@ Product catalog cached in Supabase to avoid proxy timeout on every session.
 - First-time flow: Test connection -> Load from cache -> Upload WH -> Run replenishment
 - Theme: 🌙/☀ toggle in topbar; persists to `de_theme` localStorage key (light/dark)
 
+## Deployment
+- **GitHub:** https://github.com/Roblesmau/de-replen-pro (master branch)
+- **Live app (Vercel):** https://de-replen-pro.vercel.app
+- **Shopify proxy (Vercel, separate project):** https://de-shopify-proxy.vercel.app/api/shopify
+- **Vercel team:** `roblesmau-2975s-projects`
+- `vercel.json` rewrites `/` → `/DE_Replenishment` (cleanUrls strips `.html`); deployed file is served at the root domain
+- `config.json` is gitignored (local only); contributors copy `config.example.json` and fill in their own
+- Proxy source code is NOT in this repo (deployed-only) — `shopify_proxy_vercel/api/` is empty locally; recover via `vercel pull` from the proxy project if needed
+
+### Deploy workflow
+```bash
+# 1. Commit + push to GitHub (always)
+git add -A
+git commit -m "..."
+git push
+
+# 2. Deploy to Vercel production
+#    (Until Vercel→GitHub auto-deploy is connected via Settings → Git)
+vercel --prod --yes
+```
+
+After connecting GitHub in Vercel project settings, step 2 becomes automatic on every push.
+
 ---
 
 ## Architecture Rules
