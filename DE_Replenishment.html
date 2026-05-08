@@ -926,12 +926,17 @@ function buildRecos(){
     const wh={whQty};
     const daily=d.velocity90/90;
     const daysLeft=daily>0?Math.round(d.storeQty/daily):999;
-    // Tier-based send qty: per-store, per-SKU weekly velocity → tier qty
+    // Tier-based send qty: per-store, per-SKU weekly velocity → TARGET stock level
     const tierQty=getQtyForRow(d);
     const isHot=tierQty>1;
-    // Capacity gate: by default don't overfill the shelf (skip if no room)
+    // Gap-fill rule: only send the missing units to reach the tier target.
+    // If store already has >= tierQty on hand, don't send anything for this SKU
+    // (e.g. slow seller with tierQty=1 and storeQty=1 → send 0).
+    // Hot sellers (tierQty=5 say) at storeQty=1 → send 4 to top up to target.
+    const tierGap=Math.max(0,tierQty-(d.storeQty||0));
+    // Still respect shelf capacity (unless explicitly allowed to over-fill)
     const room=Math.max(0,(d.cap||0)-d.storeQty);
-    const desiredQty=S.allowOverCap?tierQty:Math.min(tierQty,room);
+    const desiredQty=S.allowOverCap?tierGap:Math.min(tierGap,room);
     const seasonal=d.priorYear90>d.velocity90*1.3;
     const signals=[];
     if(isHot) signals.push('hot');

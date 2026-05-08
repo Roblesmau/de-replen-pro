@@ -482,10 +482,19 @@ Brand x Type grouped: `Brand | Type | On Hand | 90d Sales | Capacity | Fill% | [
 
 ## Replenishment Logic
 
-### Core Rule
+### Core Rule (gap-fill to tier target)
 ```
-Replenish IF: WH qty > 0 AND store qty < capacity(brand+type+store) AND SKU in itemMap
+tierQty = getQtyForRow(d)              // velocity-tier TARGET stock level (1, 2, 3, 5...)
+tierGap = max(0, tierQty - storeQty)   // missing units to reach target
+room    = max(0, cap - storeQty)        // shelf capacity room
+desiredQty = allowOverCap ? tierGap : min(tierGap, room)
+Send IF: desiredQty > 0 AND whQty > 0 AND SKU in itemMap AND not isExcepted
 ```
+
+**Key rule:** If a store already has >= tierQty on hand, do NOT send (regardless of capacity room).
+Slow seller (tierQty=1) + storeQty=1 → send 0 ✅
+Hot seller (tierQty=5) + storeQty=1 → send 4 (top up to target)
+Gap-fill synthetic row (storeQty=0) + tierQty=1 → send 1
 
 ### Gap-Fill (DO NOT REMOVE from top of buildRecos)
 Injects synthetic DATA rows for WH items at zero store stock. Only injects if store capacity > 0 for that brand+type.
@@ -633,6 +642,7 @@ S = {
 | NAV Transfer Order Preview unreadable in dark mode | Hardcoded hex colors (`#F0F6FC`, `#1F4E79`, `#EBF3FB`) bypassed theme tokens | Port all colors to `var(--surface)` / `var(--surface-2)` / `var(--navy)` / `var(--blue-bg)` etc. |
 | Capacity tab had local brand/type filters compounding with Inventory filters | Legacy `capFType` / `capFBrand` dropdowns left in toolbar | Hide via `display:none` with default values; renderCap continues to read Inventory filters |
 | Top understocked combos showed only dead/discontinued combos | Filter was `c.cap > 0` only — sort ascending by fill% put 0% / 0qty / 0wh at top | Split into TWO widgets: `Replenish-ready` (cap>0, wh>0, vel>0) and `Stockout — WH empty` (cap>0, wh=0, vel>0) |
+| SKU sent again even when store already has it in stock | `desiredQty = min(tierQty, room)` — used full tier qty instead of the gap to tier target. A store with 1 unit and tier=1 still got another unit because shelf room>0 | `desiredQty = min(tierQty - storeQty, room)` — only ship the missing units to reach the tier target. tier=1 + storeQty=1 → send 0; tier=5 + storeQty=1 → send 4 |
 
 ---
 
