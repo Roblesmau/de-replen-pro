@@ -1378,7 +1378,11 @@ function toggleStore(id){
   }
   saveStoreSelection();
   renderStoreGrid();filterActive();
+  // Hide all run-output cards until user re-runs — keeps everything in sync with the new selection
   document.getElementById('runSummary').style.display='none';
+  const _ir=document.getElementById('impactReport'); if(_ir) _ir.style.display='none';
+  const _rs=document.getElementById('recoSection'); if(_rs) _rs.style.display='none';
+  const _np=document.getElementById('navPreviewSection'); if(_np) _np.style.display='none';
 }
 function selectAll(){S.selOrder=STORES.map(s=>s.id);STORES.forEach(st=>S.sel.add(st.id));saveStoreSelection();renderStoreGrid();filterActive();}
 function selectNone(){S.sel.clear();S.selOrder=[];saveStoreSelection();renderStoreGrid();filterActive();}
@@ -1470,13 +1474,15 @@ function runRun(){
 // Respects Inventory tab filters. Sortable + searchable + exportable.
 function buildImpactRows(){
   const r=S.activeRecos.length?S.activeRecos:S.recos;
-  const invStores=getFilterValues('invStoreFilter');
+  // Store scope: use Store Selection (S.sel) — the actual stores in the current run.
+  // Falls back to Inventory tab store filter if nothing is selected, then to all stores.
+  const selStores=S.sel&&S.sel.size?[...S.sel]:getFilterValues('invStoreFilter');
   const invBrands=getFilterValues('invBrandFilter');
   const invTypes=getFilterValues('invTypeFilter');
   // Aggregate DATA by (storeId, brand, type) — sum of storeQty across SKUs
   const agg={}; // key = sid|||b|||t
   DATA.forEach(d=>{
-    if(invStores.length&&!invStores.includes(d.storeId)) return;
+    if(selStores.length&&!selStores.includes(d.storeId)) return;
     if(invBrands.length&&!invBrands.includes(d.brand)) return;
     if(invTypes.length&&!invTypes.includes(d.type)) return;
     const k=d.storeId+'|||'+d.brand+'|||'+d.type;
@@ -1490,7 +1496,7 @@ function buildImpactRows(){
   });
   // Add transfer units from recos
   r.forEach(x=>{
-    if(invStores.length&&!invStores.includes(x.storeId)) return;
+    if(selStores.length&&!selStores.includes(x.storeId)) return;
     if(invBrands.length&&!invBrands.includes(x.brand)) return;
     if(invTypes.length&&!invTypes.includes(x.type)) return;
     const k=x.storeId+'|||'+x.brand+'|||'+x.type;
