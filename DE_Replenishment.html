@@ -405,6 +405,21 @@
     </div>
   </div>
 
+  <!-- Replenishment Impact Report -->
+  <div class="card" id="impactReport" style="display:none">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">📊 Replenishment Impact Report <span id="impactCount" style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px"></span></div>
+        <div style="font-size:12px;color:var(--muted);max-width:640px;line-height:1.5">Per-(store, brand, type) breakdown of capacity vs on-hand, before and after the planned transfers. Respects active Inventory filters. Click any column header to sort. Hidden combos: zero capacity AND zero on-hand AND zero transfer.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="impactSearch" placeholder="🔎 Filter rows..." oninput="renderImpactReport()" style="width:200px;font-size:12px">
+        <button class="btn btn-secondary btn-sm" onclick="exportImpactReport()" title="Download as Excel">⬇ Export</button>
+      </div>
+    </div>
+    <div id="impactBody" style="overflow-x:auto;max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)"></div>
+  </div>
+
   <!-- Recommendations (inline) -->
   <div class="card" id="recoSection" style="display:none">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
@@ -1421,6 +1436,14 @@ function runRun(){
         </table></div>`;
     }
   }
+  // Show impact report (capacity vs on-hand before/after, per store/brand/type)
+  const impactSec=document.getElementById('impactReport');
+  if(impactSec){
+    impactSec.style.display='block';
+    document.getElementById('impactSearch').value='';
+    S._impactSort={col:'fillBefore',dir:'asc'};
+    renderImpactReport();
+  }
   // Show inline recommendations
   const recoSec=document.getElementById('recoSection');
   if(recoSec){
@@ -1440,6 +1463,130 @@ function runRun(){
     const el=document.getElementById('recoSection');
     if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
   },100);
+}
+
+// Replenishment Impact Report
+// Builds per-(store, brand, type) rows from DATA + active recos.
+// Respects Inventory tab filters. Sortable + searchable + exportable.
+function buildImpactRows(){
+  const r=S.activeRecos.length?S.activeRecos:S.recos;
+  const invStores=getFilterValues('invStoreFilter');
+  const invBrands=getFilterValues('invBrandFilter');
+  const invTypes=getFilterValues('invTypeFilter');
+  // Aggregate DATA by (storeId, brand, type) — sum of storeQty across SKUs
+  const agg={}; // key = sid|||b|||t
+  DATA.forEach(d=>{
+    if(invStores.length&&!invStores.includes(d.storeId)) return;
+    if(invBrands.length&&!invBrands.includes(d.brand)) return;
+    if(invTypes.length&&!invTypes.includes(d.type)) return;
+    const k=d.storeId+'|||'+d.brand+'|||'+d.type;
+    if(!agg[k]){
+      const st=STORES.find(s=>s.id===d.storeId);
+      agg[k]={storeId:d.storeId,storeName:st?.short||d.store||d.storeId,brand:d.brand,type:d.type,
+              capacity:S.CAP[d.storeId]?.[d.brand]?.[d.type]||0,
+              onHandBefore:0,sentUnits:0};
+    }
+    agg[k].onHandBefore+=(d.storeQty||0);
+  });
+  // Add transfer units from recos
+  r.forEach(x=>{
+    if(invStores.length&&!invStores.includes(x.storeId)) return;
+    if(invBrands.length&&!invBrands.includes(x.brand)) return;
+    if(invTypes.length&&!invTypes.includes(x.type)) return;
+    const k=x.storeId+'|||'+x.brand+'|||'+x.type;
+    if(!agg[k]){
+      const st=STORES.find(s=>s.id===x.storeId);
+      agg[k]={storeId:x.storeId,storeName:st?.short||x.store||x.storeId,brand:x.brand,type:x.type,
+              capacity:S.CAP[x.storeId]?.[x.brand]?.[x.type]||0,
+              onHandBefore:0,sentUnits:0};
+    }
+    agg[k].sentUnits+=(x.transferQty||0);
+  });
+  // Compute derived columns
+  return Object.values(agg).map(row=>{
+    const onHandAfter=row.onHandBefore+row.sentUnits;
+    const fillBefore=row.capacity>0?Math.round(row.onHandBefore/row.capacity*100):0;
+    const fillAfter=row.capacity>0?Math.round(onHandAfter/row.capacity*100):0;
+    return {...row,onHandAfter,fillBefore,fillAfter};
+  }).filter(x=>!(x.capacity===0&&x.onHandBefore===0&&x.sentUnits===0));
+}
+
+function renderImpactReport(){
+  const body=document.getElementById('impactBody');
+  const cnt=document.getElementById('impactCount');
+  if(!body) return;
+  let rows=buildImpactRows();
+  // Search filter
+  const q=(document.getElementById('impactSearch')?.value||'').trim().toLowerCase();
+  if(q){
+    rows=rows.filter(r=>(r.storeId+' '+r.storeName+' '+r.brand+' '+r.type).toLowerCase().includes(q));
+  }
+  // Sort
+  const sort=S._impactSort||{col:'fillBefore',dir:'asc'};
+  rows.sort((a,b)=>{
+    const av=a[sort.col],bv=b[sort.col];
+    if(typeof av==='number'&&typeof bv==='number') return sort.dir==='asc'?av-bv:bv-av;
+    return sort.dir==='asc'?String(av).localeCompare(String(bv)):String(bv).localeCompare(String(av));
+  });
+  if(cnt) cnt.textContent='· '+rows.length+' rows';
+  if(!rows.length){
+    body.innerHTML='<div style="padding:32px;text-align:center;color:var(--hint);font-size:13px">No data — adjust Inventory filters or run replenishment first.</div>';
+    return;
+  }
+  const sortIcon=col=>sort.col===col?(sort.dir==='asc'?'▲':'▼'):'';
+  const colHdr=(col,label,align='left')=>`<th onclick="sortImpactReport('${col}')" style="cursor:pointer;text-align:${align};user-select:none" title="Click to sort">${label} <span style="opacity:.6;font-size:9px">${sortIcon(col)}</span></th>`;
+  // Pill color for fill%
+  const pill=p=>{const cls=p<30?'p-err':p<60?'p-warn':p<90?'p-ok':'p-info';return `<span class="pill ${cls}" style="font-weight:600">${p}%</span>`;};
+  // Highlight before -> after delta
+  const deltaArrow=(before,after)=>{
+    if(after>before) return `<span style="color:var(--green);font-weight:600">↑${after-before}</span>`;
+    if(after<before) return `<span style="color:var(--red);font-weight:600">↓${before-after}</span>`;
+    return '<span style="color:var(--muted)">—</span>';
+  };
+  body.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead style="position:sticky;top:0;background:var(--surface-2);z-index:1"><tr>
+    ${colHdr('storeId','Store')}
+    ${colHdr('brand','Brand')}
+    ${colHdr('type','Type')}
+    ${colHdr('capacity','Capacity','right')}
+    ${colHdr('onHandBefore','On Hand Before','right')}
+    ${colHdr('sentUnits','+ Sent','right')}
+    ${colHdr('onHandAfter','On Hand After','right')}
+    ${colHdr('fillBefore','% Fulfill Before','right')}
+    ${colHdr('fillAfter','% Fulfill After','right')}
+  </tr></thead><tbody>${rows.map(r=>`<tr>
+    <td><strong>${hesc(r.storeName)}</strong> <span style="color:var(--muted);font-size:10px">${r.storeId}</span></td>
+    <td>${hesc(r.brand)}</td>
+    <td style="color:var(--muted)">${hesc(r.type)}</td>
+    <td style="text-align:right;font-weight:600">${r.capacity}</td>
+    <td style="text-align:right">${r.onHandBefore}</td>
+    <td style="text-align:right;color:${r.sentUnits>0?'var(--green)':'var(--muted)'};font-weight:${r.sentUnits>0?'600':'400'}">${r.sentUnits>0?'+'+r.sentUnits:'0'}</td>
+    <td style="text-align:right;font-weight:600">${r.onHandAfter} ${deltaArrow(r.onHandBefore,r.onHandAfter)}</td>
+    <td style="text-align:right">${pill(r.fillBefore)}</td>
+    <td style="text-align:right">${pill(r.fillAfter)}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+function sortImpactReport(col){
+  if(!S._impactSort) S._impactSort={col,dir:'asc'};
+  else if(S._impactSort.col===col) S._impactSort.dir=S._impactSort.dir==='asc'?'desc':'asc';
+  else S._impactSort={col,dir:'asc'};
+  renderImpactReport();
+}
+function exportImpactReport(){
+  const rows=buildImpactRows();
+  if(!rows.length){alert('No data to export.');return;}
+  const sort=S._impactSort||{col:'fillBefore',dir:'asc'};
+  rows.sort((a,b)=>{
+    const av=a[sort.col],bv=b[sort.col];
+    if(typeof av==='number'&&typeof bv==='number') return sort.dir==='asc'?av-bv:bv-av;
+    return sort.dir==='asc'?String(av).localeCompare(String(bv)):String(bv).localeCompare(String(av));
+  });
+  const wb=XLSX.utils.book_new();
+  const head=['Store Code','Store Name','Brand','Type','Capacity','On Hand Before','+ Sent','On Hand After','% Fulfill Before','% Fulfill After'];
+  const aoa=[head,...rows.map(r=>[r.storeId,r.storeName,r.brand,r.type,r.capacity,r.onHandBefore,r.sentUnits,r.onHandAfter,r.fillBefore,r.fillAfter])];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:13},{wch:20},{wch:18},{wch:13},{wch:10},{wch:14},{wch:8},{wch:14},{wch:16},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,ws,'Impact Report');
+  XLSX.writeFile(wb,`DE_ReplenImpact_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // Theme toggle (light/dark)

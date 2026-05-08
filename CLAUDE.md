@@ -447,6 +447,17 @@ Single card: "Exception list — SKUs to NEVER send to specific stores"
 - 6 KPI cards in `row3` grid: Stores · NAV lines · Total units · Hot sellers · WH qty before · WH qty after (with `−N` red delta)
 - **Per-store allocation table** below KPIs — ordered by current priority via `getStorePriorityOrder()`. Shows `# · Store · Lines · Units · % of total` with progress bars. This is where priority-mode differences become visible (aggregate KPIs stay stable when WH is the bottleneck).
 
+**Replenishment Impact Report** (visible after run, between Run summary and Recommendations):
+- Per-(store, brand, type) breakdown — one row per visible combo
+- Columns: `Store · Brand · Type · Capacity · On Hand Before · + Sent · On Hand After · % Fulfill Before · % Fulfill After`
+- Respects Inventory filters (`invStoreFilter`, `invBrandFilter`, `invTypeFilter`)
+- Sortable (click any column header) · Searchable (text filter) · Excel export
+- Built by `buildImpactRows()` aggregating DATA `storeQty` (per-SKU) into per-(store, brand, type) sums, then layering recos `transferQty` onto `+ Sent`
+- Default sort: fill % before ascending (most under-stocked first)
+- Hides combos that are entirely zero (cap=0 AND on-hand=0 AND sent=0)
+- Functions: `buildImpactRows`, `renderImpactReport`, `sortImpactReport`, `exportImpactReport`
+- localStorage state: `S._impactSort` (in-memory only, not persisted)
+
 **Recommendations card** (visible after run):
 - Header includes plain-language description and a pill legend explaining `N lines` / `N units` / `before → after` / `📋 NAV` pills
 - Per-store collapsed cards; each header pill shows total store on-hand `before → after`
@@ -558,7 +569,7 @@ S = {
 
 ## Before Every File Delivery — Checklist
 - [ ] No duplicate function definitions
-- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `renderPriorityList`, `renderScopeBadges`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadCapTemplate`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`, `getQtyForRow`, `saveStoreSelection`, `loadStoreSelection`, `saveVelTiers`, `loadVelTiers`, `toggleVelTierPanel`, `renderVelTiers`, `parseExcFile`, `loadExcFromLocalStorage`, `saveExcToLocalStorage`, `isExcepted`, `downloadExcTemplate`, `exportExcList`, `clearExcList`
+- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `renderPriorityList`, `renderScopeBadges`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `wipeAllCapacities`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadCapTemplate`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`, `getQtyForRow`, `saveStoreSelection`, `loadStoreSelection`, `saveVelTiers`, `loadVelTiers`, `toggleVelTierPanel`, `renderVelTiers`, `parseExcFile`, `loadExcFromLocalStorage`, `saveExcToLocalStorage`, `isExcepted`, `downloadExcTemplate`, `exportExcList`, `clearExcList`, `buildImpactRows`, `renderImpactReport`, `sortImpactReport`, `exportImpactReport`, `toggleTheme`
 - [ ] File size 200–230 KB after recent feature additions (Exceptions tab, velocity tiers, persistence) — sudden drop still indicates truncation
 - [ ] `<div class="app">` count = 1
 - [ ] No `since_id` in orders URLs
