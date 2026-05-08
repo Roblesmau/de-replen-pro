@@ -2616,13 +2616,57 @@ function renderCap(){
   html+=`<tfoot><tr style="background:var(--surface-2);border-top:2px solid var(--border2)"><td class="label-cell" style="background:var(--surface-2);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Total</td>${colTotals.map((v,i)=>`<td class="cap-col-total" data-storeid="${visibleStores[i].id}" style="text-align:center;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)">${v}</td>`).join('')}<td id="capGrandTotal" style="text-align:center;font-weight:700;font-family:'JetBrains Mono',monospace;background:var(--blue-bg);color:var(--blue);border-left:2px solid var(--border2)">${grandTotal}</td></tr></tfoot>`;
   html+='</tbody></table>';
   document.getElementById('capWrap').innerHTML=html;
-  // Total reflects visible (filtered) scope; changed count is global
-  let total=0,changed=0;
-  visibleStores.forEach(st=>comboPairs.forEach(({b,t})=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;total+=S.CAP[st.id]?.[b]?.[t]??0;}));
+  // Visible total: only cells the user can actually see/edit (passes catalog + carries gates)
+  let visibleTotal=0,changed=0;
+  visibleStores.forEach(st=>comboPairs.forEach(({b,t})=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;visibleTotal+=S.CAP[st.id]?.[b]?.[t]??0;}));
   STORES.forEach(st=>BRANDS.forEach(b=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;TYPES.forEach(t=>{if((S.CAP[st.id]?.[b]?.[t])!==S.ORIG[st.id]?.[b]?.[t]) changed++;});}));
+  // True grand total: ALL non-zero capacity values in memory (regardless of catalog/STORE_BRANDS gates)
+  // — this is what gets exported to Excel.
+  let storedTotal=0;
+  const orphanedCombos=new Set();    // (brand|||type) saved in S.CAP but not in catalogCombos
+  const visiblePairsKey=new Set(comboPairs.map(p=>p.b+'|||'+p.t));
+  Object.entries(S.CAP||{}).forEach(([sid,brandMap])=>{
+    Object.entries(brandMap||{}).forEach(([b,typeMap])=>{
+      Object.entries(typeMap||{}).forEach(([t,v])=>{
+        const n=+v||0;
+        if(n>0){
+          storedTotal+=n;
+          if(!visiblePairsKey.has(b+'|||'+t)) orphanedCombos.add(b+'|||'+t);
+        }
+      });
+    });
+  });
+  const hiddenUnits=storedTotal-visibleTotal;
   const filterActive=invStores.length||invBrands.length||invTypes.length;
-  const scopeLbl=filterActive?`<span style="color:var(--accent)">Filtered: ${visibleStores.length}/${STORES.length} stores · ${comboPairs.length} combos</span>`:`<span><strong>${STORES.length}</strong> stores</span>`;
-  document.getElementById('capSummary').innerHTML=`${scopeLbl}<span><strong>${total.toLocaleString()}</strong> total units capacity${filterActive?' (filtered)':''}</span>${changed?`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`:''}`;
+  const scopeLbl=filterActive?`<span style="color:var(--accent)">Filtered: ${visibleStores.length}/${STORES.length} stores · ${comboPairs.length} combos</span>`:`<span><strong>${STORES.length}</strong> stores · ${comboPairs.length} combos</span>`;
+  let html=`${scopeLbl}<span><strong>${visibleTotal.toLocaleString()}</strong> total units capacity${filterActive?' (filtered)':''}</span>`;
+  if(hiddenUnits>0){
+    html+=`<span style="color:var(--amber)" title="Cells in S.CAP whose (brand, type) pair isn't in the live Shopify catalog OR brand isn't assigned to the store. They survive in memory and are re-exported but not shown above. Click to inspect.">⚠ <strong>${hiddenUnits.toLocaleString()}</strong> units hidden in <strong>${orphanedCombos.size}</strong> combo(s) <button onclick="showOrphanedCapacity()" style="background:none;border:none;color:var(--blue);text-decoration:underline;cursor:pointer;font-size:11px;padding:0">show</button></span>`;
+  }
+  if(changed) html+=`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`;
+  html+=`<span style="margin-left:auto;color:var(--muted)">Stored grand total (export): <strong style="font-family:'JetBrains Mono',monospace">${storedTotal.toLocaleString()}</strong></span>`;
+  document.getElementById('capSummary').innerHTML=html;
+  // Cache for the diagnostic dialog
+  S._capOrphans=[...orphanedCombos];
+}
+// Show a list of orphaned (brand, type) combos so user can spot typos/missing-from-catalog issues
+function showOrphanedCapacity(){
+  const orphans=S._capOrphans||[];
+  if(!orphans.length){ alert('No orphaned combos.'); return; }
+  // Build per-orphan summary: total units across stores + first few stores carrying it
+  const lines=orphans.map(k=>{
+    const[b,t]=k.split('|||');
+    let total=0; const stores=[];
+    Object.entries(S.CAP||{}).forEach(([sid,bm])=>{
+      const v=+(bm?.[b]?.[t]||0); if(v>0){ total+=v; stores.push(sid+'='+v); }
+    });
+    return `• ${b} / ${t}  → ${total} units across ${stores.length} stores  [${stores.slice(0,3).join(', ')}${stores.length>3?', …':''}]`;
+  });
+  const inCatalog=Object.values(S.raw?.itemMap||{}).some(v=>v.brand&&v.type);
+  const reason=inCatalog
+    ? 'These (brand, type) combos are in your capacity matrix but DO NOT exist in the live Shopify catalog. Likely causes: typo in Excel ("RAYBAN" vs "RAY-BAN"), case mismatch, trailing spaces, OR a brand/type that was discontinued in Shopify since the file was created.\n\nFix: re-export the matrix, correct the spelling in the Excel, then Clear all → Import.'
+    : 'Catalog isn\'t loaded — these combos look orphaned simply because Step 2A hasn\'t run yet. Load from cache or do a Full Shopify load and they should appear.';
+  alert('Orphaned combos: '+orphans.length+'\n\n'+reason+'\n\nList:\n\n'+lines.join('\n'));
 }
 function onCapChange(input){
   const{store,brand,type}=input.dataset;const v=Math.max(0,parseInt(input.value)||0);S.CAP[store][brand][type]=v;
