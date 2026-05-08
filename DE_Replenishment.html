@@ -2577,6 +2577,18 @@ function renderCap(){
       TYPES.map(t=>`<option value="${t}"${curType===t?' selected':''}>${t}</option>`).join('');
   }
   const tf=document.getElementById('capFType').value,bf=document.getElementById('capFBrand').value;
+  // Self-heal: any store/brand with non-zero capacity in S.CAP must also be in S.STORE_BRANDS,
+  // otherwise the table shows "+" buttons, the footer total skips it, but the export still emits it
+  // (causing visible-vs-Excel discrepancy after imports). Sync up before rendering.
+  Object.entries(S.CAP||{}).forEach(([sid,brandMap])=>{
+    if(!S.STORE_BRANDS[sid]) S.STORE_BRANDS[sid]=new Set();
+    Object.entries(brandMap||{}).forEach(([b,typeMap])=>{
+      const hasValue=Object.values(typeMap||{}).some(v=>(+v||0)>0);
+      if(hasValue && !S.STORE_BRANDS[sid].has(b)) S.STORE_BRANDS[sid].add(b);
+      // Also make sure unknown brands are in BRANDS list so renderCap's BRANDS.includes(b) check passes
+      if(hasValue && !BRANDS.includes(b)) BRANDS.push(b);
+    });
+  });
   // Inherit Inventory tab filters (Stores / Brands / Types) — snapshot at render time
   const invStores=getFilterValues('invStoreFilter');
   const invBrands=getFilterValues('invBrandFilter');
