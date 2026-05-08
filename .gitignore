@@ -1,10 +1,21 @@
 .vercel
+.vercel/
+**/.vercel/
 Secretos.txt
 .claude/
 *.zip
 DE_Replenishment_Package.zip
 # Local config (use config.example.json as template)
 config.json
+# Environment / secret files
+.env
+.env.local
+.env.development.local
+.env.production.local
+**/.env
+**/.env.local
+**/.env.development.local
+**/.env.production.local
 # OS / editor artifacts
 .DS_Store
 Thumbs.db

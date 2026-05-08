@@ -389,6 +389,9 @@ Inventory filter changes propagate to: Dashboard widgets (`updateDash`), Capacit
 - **Top section:** Capacity matrix upload card (file input + "⬇ Download template (5 examples)" button) — moved here from Settings
 - **Toolbar:** `+ Add brand to stores` · hint text "Filters controlled in Inventory tab" · Import · Template · Export & Save · Reset
 - **Local filter dropdowns hidden** (`capFType` / `capFBrand` are `display:none` with default values that pass through) — Inventory tab is sole filter source
+- **Reset vs Clear all** — two distinct buttons:
+  - `↺ Reset` (resetCap) — restores defaults from `S.ORIG` (keeps matrix populated; clears localStorage too)
+  - `🗑 Clear all` (wipeAllCapacities) — deletes EVERY capacity value from memory + localStorage so you can import a fresh Excel containing only the brands you carry. Workflow: Clear all → Import fresh Excel (additive). Import remains additive — only adds rows present in the file.
 - **Table:** Brand/Type rows × Store columns (filtered to Inventory selection)
 - **Bottom summary:** scope label · total units · changed-cells count (no Export Excel button — top toolbar is sole action source)
 

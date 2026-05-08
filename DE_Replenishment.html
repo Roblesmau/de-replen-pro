@@ -609,7 +609,8 @@
       <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import capacity from Excel">⬆ Import<input type="file" id="capFile" accept=".xlsx,.xls,.csv" onchange="importCapFromFile(this)" style="display:none"></label>
       <button class="btn btn-secondary btn-sm" onclick="downloadCapTemplate()" title="Download a 5-row template to fill in">⬇ Template</button>
       <button class="btn btn-green btn-sm" onclick="exportCapXLSXAndSave()">⬇ Export &amp; Save</button>
-      <button class="btn btn-secondary btn-sm" onclick="resetCap()">↺ Reset</button>
+      <button class="btn btn-secondary btn-sm" onclick="resetCap()" title="Restore capacity defaults (keeps the matrix populated)">↺ Reset</button>
+      <button class="btn btn-secondary btn-sm" onclick="wipeAllCapacities()" title="Delete every capacity value from memory and localStorage so you can import a fresh file" style="color:var(--red);border-color:var(--red)">🗑 Clear all</button>
     </div>
   </div>
   <div id="capUpStatus" style="margin-bottom:10px"></div>
@@ -2562,7 +2563,7 @@ function importCapFromFile(input){
       const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''});
       let n=0;
       rows.forEach(r=>{
-        const sid=(r['Store Code']||''). trim(),b=(r['Brand']||''). trim(),t=(r['Type']||''). trim(),v=parseInt(r['Max Capacity']||0)||0;
+        const sid=(r['Store Code']||'').toString().trim(),b=(r['Brand']||'').toString().trim(),t=(r['Type']||'').toString().trim(),v=parseInt(r['Max Capacity']||0)||0;
         if(!sid||!b||!t) return;
         if(!S.CAP[sid]) S.CAP[sid]={};
         if(!S.CAP[sid][b]) S.CAP[sid][b]={};
@@ -2581,6 +2582,35 @@ function importCapFromFile(input){
     }catch(e){const st=document.getElementById('capUpStatus');if(st) st.innerHTML=`<div class="sb s-err">✗ Import error: ${e.message}</div>`;else alert('Import error: '+e.message);}
   };
   reader.readAsArrayBuffer(file);
+}
+
+// Clear ALL capacity entries from memory (wipe S.CAP, S.ORIG, S.STORE_BRANDS)
+// and from localStorage. Different from Reset (which restores defaults from S.ORIG).
+// Use this when you want to start from a blank matrix and import a fresh Excel.
+function wipeAllCapacities(){
+  const msg='Delete ALL capacity values?\n\n'+
+    '• Every brand × type × store cell will be removed from memory\n'+
+    '• localStorage will be cleared (de_capacity_v1 + de_capacity_saved_at)\n'+
+    '• You can then import a fresh Excel containing only the brands you carry\n\n'+
+    'This is different from Reset (which only restores defaults).\n'+
+    'This action cannot be undone.';
+  if(!confirm(msg)) return;
+  // Wipe in-memory structures, keeping the per-store skeleton so renderCap doesn't break
+  STORES.forEach(st=>{
+    S.CAP[st.id]={};
+    S.ORIG[st.id]={};
+    if(S.STORE_BRANDS[st.id]) S.STORE_BRANDS[st.id].clear(); else S.STORE_BRANDS[st.id]=new Set();
+  });
+  S.newBrands.clear();
+  S.capChanges=0;
+  const badge=document.getElementById('capBadge'); if(badge) badge.style.display='none';
+  try{ localStorage.removeItem('de_capacity_v1'); localStorage.removeItem('de_capacity_saved_at'); }catch(e){}
+  applyCapToData();
+  renderCap();
+  populateCapBrandFilter();
+  if(DATA.length) renderInv();
+  const st=document.getElementById('capUpStatus');
+  if(st) st.innerHTML=`<div class="sb s-warn">🗑 All capacities cleared from memory and localStorage. Import a fresh Excel to populate.</div>`;
 }
 function parseCapFile(input){
   const file=input.files[0];if(!file) return;const reader=new FileReader();
