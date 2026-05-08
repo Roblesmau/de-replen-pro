@@ -657,6 +657,7 @@ S = {
 | Capacity tab had local brand/type filters compounding with Inventory filters | Legacy `capFType` / `capFBrand` dropdowns left in toolbar | Hide via `display:none` with default values; renderCap continues to read Inventory filters |
 | Top understocked combos showed only dead/discontinued combos | Filter was `c.cap > 0` only — sort ascending by fill% put 0% / 0qty / 0wh at top | Split into TWO widgets: `Replenish-ready` (cap>0, wh>0, vel>0) and `Stockout — WH empty` (cap>0, wh=0, vel>0) |
 | SKU sent again even when store already has it in stock | `desiredQty = min(tierQty, room)` — used full tier qty instead of the gap to tier target. A store with 1 unit and tier=1 still got another unit because shelf room>0 | `desiredQty = min(tierQty - storeQty, room)` — only ship the missing units to reach the tier target. tier=1 + storeQty=1 → send 0; tier=5 + storeQty=1 → send 4 |
+| Capacity Excel export had phantom rows (e.g. ABATTA × BACKPACK / CLIPS / GOGGLES that don't exist in catalog) | `exportCapXLSX` iterated `BRANDS × TYPES` Cartesian product instead of catalog combos | Use the same `catalogCombos` source as `renderCap` (driven from `S.raw.itemMap`); fall back to non-zero S.CAP cells if no catalog loaded yet |
 
 ---
 

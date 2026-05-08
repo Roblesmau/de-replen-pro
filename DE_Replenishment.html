@@ -2656,9 +2656,40 @@ function updateCapTotals(){
 function addBrandToStore(brand,storeId){if(!S.CAP[storeId][brand]) S.CAP[storeId][brand]={};TYPES.forEach(t=>{if(S.CAP[storeId][brand][t]===undefined) S.CAP[storeId][brand][t]=0;});S.STORE_BRANDS[storeId].add(brand);renderCap();}
 function resetCap(){if(!confirm('Reset all changes? This permanently clears saved capacity edits.')) return;STORES.forEach(st=>BRANDS.forEach(b=>TYPES.forEach(t=>{if(S.ORIG[st.id]?.[b]?.[t]!==undefined) S.CAP[st.id][b][t]=S.ORIG[st.id][b][t];})));S.newBrands.forEach(b=>{BRANDS=BRANDS.filter(x=>x!==b);STORES.forEach(st=>{delete S.CAP[st.id][b];S.STORE_BRANDS[st.id].delete(b);});});S.newBrands.clear();S.capChanges=0;document.getElementById('capBadge').style.display='none';try{localStorage.removeItem('de_capacity_v1');localStorage.removeItem('de_capacity_saved_at');}catch(e){}applyCapToData();renderCap();populateCapBrandFilter();if(DATA.length) renderInv();}
 function exportCapXLSX(){
-  const wb=XLSX.utils.book_new();const rows=[['Store Code','Store Name','Brand','Type','Max Capacity']];
-  STORES.forEach(st=>BRANDS.forEach(b=>{if(!S.STORE_BRANDS[st.id]?.has(b)) return;TYPES.forEach(t=>{rows.push([st.id,st.name,b,t,S.CAP[st.id]?.[b]?.[t]??0]);});}));
-  const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:12},{wch:34},{wch:16},{wch:13},{wch:13}];XLSX.utils.book_append_sheet(wb,ws,'Capacity Matrix');XLSX.writeFile(wb,`DesignerEyes_Capacity_${new Date().toISOString().slice(0,10)}.xlsx`);
+  const wb=XLSX.utils.book_new();
+  const rows=[['Store Code','Store Name','Brand','Type','Max Capacity']];
+  // Only emit (brand, type) combos that exist in the live catalog — same source as the on-screen table.
+  // Avoids Cartesian phantom rows (e.g. ABATTA × BACKPACK when no such product exists).
+  const catalogCombos=new Set();
+  Object.values(S.raw?.itemMap||{}).forEach(v=>{
+    if(v && v.brand && v.brand!=='Unknown' && v.type && v.type!=='Unknown'){
+      catalogCombos.add(v.brand+'|||'+v.type);
+    }
+  });
+  // Fallback: if no catalog loaded yet, emit cells that have any non-zero capacity instead of nothing.
+  if(catalogCombos.size===0){
+    STORES.forEach(st=>{
+      Object.entries(S.CAP[st.id]||{}).forEach(([b,tm])=>{
+        Object.entries(tm||{}).forEach(([t,v])=>{
+          if((+v||0)>0) catalogCombos.add(b+'|||'+t);
+        });
+      });
+    });
+  }
+  // Sort combos for stable output (brand A→Z, then type A→Z)
+  const sortedPairs=[...catalogCombos].map(k=>{const[b,t]=k.split('|||');return{b,t};})
+    .sort((a,b)=>a.b.localeCompare(b.b)||a.t.localeCompare(b.t));
+  STORES.forEach(st=>{
+    sortedPairs.forEach(({b,t})=>{
+      // Skip brands that aren't assigned to this store at all (keeps the file lean)
+      if(S.STORE_BRANDS[st.id] && !S.STORE_BRANDS[st.id].has(b) && !(S.CAP[st.id]?.[b]?.[t])) return;
+      rows.push([st.id,st.name,b,t,S.CAP[st.id]?.[b]?.[t]??0]);
+    });
+  });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:12},{wch:34},{wch:16},{wch:13},{wch:13}];
+  XLSX.utils.book_append_sheet(wb,ws,'Capacity Matrix');
+  XLSX.writeFile(wb,`DesignerEyes_Capacity_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 function exportCapXLSXAndSave(){
   exportCapXLSX();
