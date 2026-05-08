@@ -2651,13 +2651,13 @@ function renderCap(){
   const hiddenUnits=storedTotal-visibleTotal;
   const filterActive=invStores.length||invBrands.length||invTypes.length;
   const scopeLbl=filterActive?`<span style="color:var(--accent)">Filtered: ${visibleStores.length}/${STORES.length} stores · ${comboPairs.length} combos</span>`:`<span><strong>${STORES.length}</strong> stores · ${comboPairs.length} combos</span>`;
-  let html=`${scopeLbl}<span><strong>${visibleTotal.toLocaleString()}</strong> total units capacity${filterActive?' (filtered)':''}</span>`;
+  let summaryHtml=`${scopeLbl}<span><strong>${visibleTotal.toLocaleString()}</strong> total units capacity${filterActive?' (filtered)':''}</span>`;
   if(hiddenUnits>0){
-    html+=`<span style="color:var(--amber)" title="Cells in S.CAP whose (brand, type) pair isn't in the live Shopify catalog OR brand isn't assigned to the store. They survive in memory and are re-exported but not shown above. Click to inspect.">⚠ <strong>${hiddenUnits.toLocaleString()}</strong> units hidden in <strong>${orphanedCombos.size}</strong> combo(s) <button onclick="showOrphanedCapacity()" style="background:none;border:none;color:var(--blue);text-decoration:underline;cursor:pointer;font-size:11px;padding:0">show</button></span>`;
+    summaryHtml+=`<span style="color:var(--amber)" title="Cells in S.CAP whose (brand, type) pair isn't in the live Shopify catalog OR brand isn't assigned to the store. They survive in memory and are re-exported but not shown above. Click to inspect.">⚠ <strong>${hiddenUnits.toLocaleString()}</strong> units hidden in <strong>${orphanedCombos.size}</strong> combo(s) <button onclick="showOrphanedCapacity()" style="background:none;border:none;color:var(--blue);text-decoration:underline;cursor:pointer;font-size:11px;padding:0">show</button></span>`;
   }
-  if(changed) html+=`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`;
-  html+=`<span style="margin-left:auto;color:var(--muted)">Stored grand total (export): <strong style="font-family:'JetBrains Mono',monospace">${storedTotal.toLocaleString()}</strong></span>`;
-  document.getElementById('capSummary').innerHTML=html;
+  if(changed) summaryHtml+=`<span style="color:var(--amber)"><strong>${changed}</strong> cells changed</span>`;
+  summaryHtml+=`<span style="margin-left:auto;color:var(--muted)">Stored grand total (export): <strong style="font-family:'JetBrains Mono',monospace">${storedTotal.toLocaleString()}</strong></span>`;
+  document.getElementById('capSummary').innerHTML=summaryHtml;
   // Cache for the diagnostic dialog
   S._capOrphans=[...orphanedCombos];
 }
