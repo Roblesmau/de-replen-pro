@@ -670,6 +670,7 @@
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 2A &mdash; Catalog</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
           <button id="btnCache" class="btn btn-green btn-sm" onclick="loadCatalogFromCache()" title="Read product catalog from Supabase &mdash; fast, then auto-loads live data" disabled style="opacity:.4;cursor:not-allowed">&#9889; Load from cache</button>
+          <span id="cacheLastSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking cache…</span>
           <button id="btnLoad" class="btn btn-primary btn-sm" onclick="loadCatalogFromShopify()" title="Full Shopify fetch &mdash; syncs catalog to Supabase, then auto-loads live data" disabled style="opacity:.4;cursor:not-allowed">&#128229; Full Shopify load</button>
         </div>
       </div>
@@ -3213,6 +3214,8 @@ async function syncCatalogToSupabase(itemMap){
     body:{product_count:rows.filter(r=>r.variant_sku).length,variant_count:rows.length}
   });
   clog('  ✓ Supabase catalog sync complete — '+rows.length+' items');
+  // Refresh the "Cache last refreshed" label since we just updated de_sync_log
+  if(typeof refreshCacheLastSync==='function') refreshCacheLastSync().catch(()=>{});
 }
 
 
@@ -3459,8 +3462,36 @@ async function testConn(){
     {const _b=document.getElementById('modeBadge');if(_b){_b.textContent='Live Shopify POS';_b.className='badge badge-live';}}
     setStep(1,'ok');
     // setStep handles unlocking both 2A buttons
+    // Also fetch when the catalog cache was last refreshed so user knows what they're loading
+    refreshCacheLastSync().catch(()=>{});
   }catch(e){
     clog('✗ '+e.message);setConnStatus('✗ '+e.message,'s-err');setStep(1,'err');
+  }
+}
+
+// Fetch + display the catalog cache freshness from Supabase de_sync_log
+async function refreshCacheLastSync(){
+  const lbl=document.getElementById('cacheLastSync');
+  if(!lbl) return;
+  const {url,key}=getSBCreds();
+  if(!url||!key){ lbl.textContent='Cache: Supabase not configured'; lbl.style.color='var(--muted)'; return; }
+  try{
+    const rows=await sbFetch('/de_sync_log?select=synced_at,variant_count,product_count&order=synced_at.desc&limit=1');
+    if(!Array.isArray(rows)||!rows.length){
+      lbl.innerHTML='Cache: never synced';
+      lbl.style.color='var(--amber)';
+      return;
+    }
+    const r=rows[0];
+    const when=r.synced_at;
+    const ago=fmtRelTime(when);
+    const items=(r.variant_count||0).toLocaleString();
+    lbl.innerHTML=`Cache last refreshed <strong>${ago}</strong> · ${items} items`;
+    lbl.style.color=(Date.now()-new Date(when).getTime())/3600000>48?'var(--amber)':'var(--green)';
+    lbl.title='Catalog cache freshness — pulled from Supabase de_sync_log. Last full Shopify sync on '+new Date(when).toLocaleString();
+  }catch(e){
+    lbl.textContent='Cache status unavailable';
+    lbl.style.color='var(--muted)';
   }
 }
 // Global SKU normalizer — strip leading apostrophes and whitespace
@@ -4334,6 +4365,8 @@ loadCredentials();
 ['liveToken','liveDomain','proxyUrl','sbUrl','sbKey'].forEach(id=>{
   const el=document.getElementById(id);if(el) el.addEventListener('change',saveCredentials);
 });
+// Populate cache freshness label on initial page load if Supabase creds are already saved
+if(typeof refreshCacheLastSync==='function') setTimeout(()=>refreshCacheLastSync().catch(()=>{}),100);
 </script>
 </body>
 </html>
