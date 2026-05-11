@@ -296,17 +296,23 @@
   <div class="card">
     <div class="card-title">Exception list — SKUs to NEVER send to specific stores</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:14px">
-      Any (Store Code · Variant SKU) pair on this list is excluded from replenishment recommendations. Stored in memory + localStorage.
+      Any (Store Code · Variant SKU) pair on this list is excluded from replenishment recommendations. Shared across all users via Supabase; localStorage is the local cache.
+    </div>
+    <!-- Cloud sync status box -->
+    <div id="excCloudBox" style="margin-bottom:10px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:14px">☁</span>
+      <span id="excCloudStatus" style="color:var(--muted)">Checking cloud sync…</span>
     </div>
     <!-- Toolbar -->
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-      <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import from Excel">
+      <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import from Excel — REPLACES current list, then pushes to cloud">
         ⬆ Import
         <input type="file" id="excFile" accept=".xlsx,.xls,.csv" onchange="parseExcFile(this)" style="display:none">
       </label>
       <button class="btn btn-secondary btn-sm" onclick="downloadExcTemplate()" title="Download a 5-row template">⬇ Template</button>
       <button class="btn btn-secondary btn-sm" onclick="exportExcList()">⬇ Export current list</button>
-      <button class="btn btn-secondary btn-sm" onclick="clearExcList()">↺ Clear list</button>
+      <button class="btn btn-secondary btn-sm" onclick="pullExceptionsFromSupabase(true)" title="Re-fetch exception list from Supabase">☁ Pull</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearExcList()" style="color:var(--red);border-color:var(--red)" title="Clear list locally + in cloud">↺ Clear list</button>
       <span id="excCount" style="font-size:11px;color:var(--hint);margin-left:auto"></span>
     </div>
     <div id="excUpStatus" style="margin-bottom:10px"></div>
@@ -1238,11 +1244,14 @@ function addExcManual(){
   document.getElementById('excAddSku').value='';
   document.getElementById('excAddSku').focus();
   if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+  // Push to cloud so other users see this addition
+  pushExceptionsToSupabase().catch(e=>setExcCloudStatus('⚠ Cloud push failed: '+e.message,'amber'));
 }
 function removeExc(sid,sku){
   S.exceptions.delete(excKey(sid,sku));
   saveExcToLocalStorage();
   if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+  pushExceptionsToSupabase().catch(e=>setExcCloudStatus('⚠ Cloud push failed: '+e.message,'amber'));
 }
 function parseExcFile(input){
   const file=input.files[0];if(!file) return;
@@ -1264,8 +1273,14 @@ function parseExcFile(input){
       });
       saveExcToLocalStorage();
       const skipped=bad?` · ${bad} skipped (missing Store Code or SKU)`:'';
-      document.getElementById('excUpStatus').innerHTML=`<div class="sb s-ok">✓ Loaded ${n} exceptions from ${file.name}${skipped} · saved</div>`;
+      document.getElementById('excUpStatus').innerHTML=`<div class="sb s-ok">✓ Loaded ${n} exceptions from ${file.name}${skipped} · saved locally · syncing to cloud…</div>`;
       if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+      // Replace cloud list to match the imported one (truly destructive replace)
+      pushExceptionsToSupabase(true).then(()=>{
+        document.getElementById('excUpStatus').innerHTML=`<div class="sb s-ok">✓ Loaded ${n} exceptions from ${file.name}${skipped} · saved locally + synced to cloud</div>`;
+      }).catch(e=>{
+        document.getElementById('excUpStatus').innerHTML=`<div class="sb s-warn">✓ Loaded locally, cloud push failed: ${e.message}</div>`;
+      });
     }catch(e){document.getElementById('excUpStatus').innerHTML=`<div class="sb s-err">✗ ${e.message}</div>`;}
   };
   reader.readAsArrayBuffer(file);
@@ -1302,12 +1317,117 @@ function exportExcList(){
   XLSX.writeFile(wb,`DE_Exception_List_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 function clearExcList(){
-  if(!confirm('Clear the exception list? This wipes localStorage too.')) return;
+  if(!confirm('Clear the exception list?\n\n• Wipes local memory + localStorage\n• Also wipes the CLOUD list — affects all users\n• Cannot be undone')) return;
   S.exceptions=new Set();
   try{localStorage.removeItem('de_exceptions_v1');}catch(e){}
   updateExcCount();
-  document.getElementById('excUpStatus').innerHTML='<div class="sb s-info">Exception list cleared.</div>';
+  document.getElementById('excUpStatus').innerHTML='<div class="sb s-info">Exception list cleared locally, wiping cloud…</div>';
   if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+  wipeCloudExceptions().then(()=>{
+    document.getElementById('excUpStatus').innerHTML='<div class="sb s-info">Exception list cleared — locally and in cloud.</div>';
+  }).catch(e=>{
+    document.getElementById('excUpStatus').innerHTML=`<div class="sb s-warn">Cleared locally, cloud wipe failed: ${e.message}</div>`;
+  });
+}
+
+// ---- Exceptions Cloud Sync (Supabase) ----
+// Shared list across users, stored in `de_exceptions` and `de_exceptions_meta` tables.
+// Pull on boot + on tab activation. Push on every mutation (add/remove/import/clear).
+
+function setExcCloudStatus(text,color){
+  const el=document.getElementById('excCloudStatus');
+  if(!el) return;
+  const col=color==='green'?'var(--green)':color==='amber'?'var(--amber)':color==='red'?'var(--red)':'var(--muted)';
+  el.style.color=col;
+  el.innerHTML=text;
+}
+async function pullExceptionsFromSupabase(manual=false){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setExcCloudStatus('Supabase not configured — local-only mode'); return; }
+  try{
+    setExcCloudStatus('☁ Pulling from cloud…');
+    let all=[]; let from=0; const pageSize=1000;
+    while(true){
+      const page=await sbFetch('/de_exceptions?select=*&order=store_id&limit='+pageSize+'&offset='+from);
+      if(!Array.isArray(page)||!page.length) break;
+      all=all.concat(page);
+      if(page.length<pageSize) break;
+      from+=pageSize;
+    }
+    S.exceptions=new Set();
+    all.forEach(r=>{
+      const sid=String(r.store_id||'').trim();
+      const sku=String(r.sku||'').trim().toLowerCase();
+      if(sid&&sku) S.exceptions.add(excKey(sid,sku));
+    });
+    // Keep localStorage in sync as a fast offline cache
+    try{localStorage.setItem('de_exceptions_v1',JSON.stringify([...S.exceptions]));}catch(_){}
+    updateExcCount();
+    if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+    let meta=null;
+    try{ const m=await sbFetch('/de_exceptions_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    if(meta){
+      const who=meta.last_uploaded_by||'someone';
+      setExcCloudStatus(`Last sync: <strong>${fmtRelTime(meta.last_uploaded_at)}</strong> by <strong>${who}</strong> · ${meta.exception_count||all.length} exceptions in cloud · pulled ${all.length} now`,'green');
+    } else {
+      setExcCloudStatus(`Pulled ${all.length} exceptions from cloud`,'green');
+    }
+    if(manual) clog('☁ Exceptions pulled from cloud: '+all.length+' rows');
+  }catch(e){
+    if(e.message&&e.message.includes('404')) setExcCloudStatus('⚠ Cloud table not found — run the SQL DDL in Supabase to enable sync','amber');
+    else setExcCloudStatus('⚠ Cloud pull failed: '+e.message,'amber');
+  }
+}
+async function pushExceptionsToSupabase(destructiveReplace=false){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setExcCloudStatus('Supabase not configured — local-only mode'); return; }
+  try{
+    setExcCloudStatus('☁ Pushing to cloud…');
+    // For replace-style operations (file import, manual single-add doesn't need this),
+    // wipe the cloud first so removed entries actually disappear.
+    if(destructiveReplace){
+      await sbFetch('/de_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+    } else {
+      // For incremental adds/removes: also clear so remove operations propagate.
+      // Cheap: list is usually small (<500 rows). One DELETE round-trip.
+      await sbFetch('/de_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+    }
+    const rows=[...(S.exceptions||[])].map(k=>{
+      const[sid,sku]=k.split('|');
+      return{store_id:sid,sku,added_at:new Date().toISOString(),added_by:getCurrentUserLabel()};
+    });
+    let pushed=0;
+    if(rows.length){
+      for(let i=0;i<rows.length;i+=500){
+        const batch=rows.slice(i,i+500);
+        await sbFetch('/de_exceptions?on_conflict=store_id,sku',{
+          method:'POST',
+          prefer:'resolution=merge-duplicates,return=minimal',
+          body:batch
+        });
+        pushed+=batch.length;
+      }
+    }
+    const who=getCurrentUserLabel();
+    try{
+      await sbFetch('/de_exceptions_meta?on_conflict=id',{
+        method:'POST',
+        prefer:'resolution=merge-duplicates,return=minimal',
+        body:[{id:1,last_uploaded_at:new Date().toISOString(),last_uploaded_by:who,exception_count:pushed}]
+      });
+    }catch(metaErr){ clog('Exceptions meta update warning: '+metaErr.message); }
+    setExcCloudStatus(`Last sync: <strong>just now</strong> by <strong>${who}</strong> · ${pushed} exceptions in cloud`,'green');
+  }catch(e){
+    if(e.message&&e.message.includes('404')) setExcCloudStatus('⚠ Cloud table not found — run the SQL DDL','amber');
+    else setExcCloudStatus('⚠ Cloud push failed: '+e.message,'amber');
+  }
+}
+async function wipeCloudExceptions(){
+  const {url,key}=getSBCreds();
+  if(!url||!key) return;
+  await sbFetch('/de_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+  await sbFetch('/de_exceptions_meta?id=eq.1',{method:'DELETE',prefer:'return=minimal'});
+  setExcCloudStatus('Cloud exception list cleared','amber');
 }
 
 // Store selection
@@ -1629,7 +1749,7 @@ function showTab(t){
   if(t==='nav'){populateNavStore();renderNAVPreview();}
   if(t==='inventory'){populateInvFilters();renderInv();}
   if(t==='capacity'){ renderCap(); if(typeof pullCapacityFromSupabase==='function' && !S._capCloudPulled){ S._capCloudPulled=true; pullCapacityFromSupabase().catch(()=>{}); } }
-  if(t==='exceptions') renderExcList();
+  if(t==='exceptions'){ renderExcList(); if(typeof pullExceptionsFromSupabase==='function' && !S._excCloudPulled){ S._excCloudPulled=true; pullExceptionsFromSupabase().catch(()=>{}); } }
 }
 
 function setMode(m){
@@ -3770,6 +3890,8 @@ function processLiveData(locs,invLevels,orders){
   // Restore saved store selection (intersected with current STORES) — fall back to all
   loadVelTiers();
   loadExcFromLocalStorage();
+  // Then pull cloud exceptions (shared source of truth) — non-blocking
+  pullExceptionsFromSupabase().catch(e=>clog('Exception cloud pull warning: '+e.message));
   if(!loadStoreSelection()){
     S.sel.clear();STORES.forEach(st=>S.sel.add(st.id));
     S.selOrder=STORES.map(s=>s.id);
