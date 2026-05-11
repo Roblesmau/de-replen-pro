@@ -385,6 +385,16 @@ Each column: `flex-direction:column`, label is `font-size:11px, uppercase, lette
 
 Inventory filter changes propagate to: Dashboard widgets (`updateDash`), Capacity tab (rendered on tab switch), Replenishment scope (`buildRecos` re-runs).
 
+### Capacity — Cloud sync (Supabase, shared across users)
+- Two new Supabase tables: `de_capacity` (rows: store_id, brand, type, max_capacity, updated_at, updated_by) and `de_capacity_meta` (single-row table holding last_uploaded_at, last_uploaded_by, cell_count for the badge)
+- SQL DDL documented in commit message — run once in Supabase SQL Editor
+- Pull on boot: `pullCapacityFromSupabase()` fires after `processLiveData` populates S.CAP from localStorage; cloud rows are then overlaid (cloud = source of truth). Also fires on first Capacity tab activation
+- Push on save: `pushCapacityToSupabase()` called from `exportCapXLSXAndSave` (rebadged "Save & Sync") AND from `importCapFromFile` success. Upserts all non-zero cells in batches of 500 with `on_conflict=store_id,brand,type&resolution=merge-duplicates`, then bumps the meta row
+- Clear all: also calls `wipeCloudCapacity()` (deletes all rows in `de_capacity` and the meta row)
+- Toolbar buttons: `⬇ Save & Sync` (was `Export & Save`) · `☁ Pull` (manual re-fetch) · existing Reset / Clear all
+- Cloud status box at top of Capacity tab (`#capCloudBox`): shows `Last sync: 5m ago by mauricio · 1,245 cells in cloud`; updates after every push/pull. Helper: `setCloudStatus`, `fmtRelTime`, `getCurrentUserLabel` (best-effort: domain part of Shopify domain → 'anonymous' if missing)
+- Graceful degradation: if Supabase table doesn't exist (404), badge shows "Cloud table not found — run the SQL DDL"; localStorage continues working
+
 ### Capacity Tab (current)
 - **Top section:** Capacity matrix upload card (file input + "⬇ Download template (5 examples)" button) — moved here from Settings
 - **Toolbar:** `+ Add brand to stores` · hint text "Filters controlled in Inventory tab" · Import · Template · Export & Save · Reset

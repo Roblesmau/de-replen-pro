@@ -162,7 +162,9 @@
 
   /* Tables */
   table { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
-  th { font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); background:var(--surface-2); }
+  /* Sticky header — works inside any scroll container (e.g. overflow:auto wrappers, max-height boxes) */
+  th { font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); background:var(--surface-2); position:sticky; top:0; z-index:5; box-shadow:0 1px 0 0 var(--border); }
+  thead th { background:var(--surface-2); }
   td { padding:8px 10px; border-bottom:1px solid var(--border); }
   tr:last-child td { border-bottom:none; }
   tr:hover td { background:var(--surface-2); }
@@ -211,7 +213,7 @@
   .cap-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius-lg); }
   .cap-table { border-collapse:collapse; min-width:100%; font-size:11px; }
   .cap-table th { font-size:10px; font-weight:600; color:#fff; padding:7px 9px; text-align:center; border-bottom:1px solid rgba(255,255,255,.15); background:#1A3A5C; white-space:nowrap; }
-  .cap-table th.frozen { position:sticky; left:0; z-index:2; text-align:left; background:#243B55; }
+  .cap-table th.frozen { position:sticky; left:0; top:0; z-index:7; text-align:left; background:#243B55; }
   .cap-table td { padding:0; border-bottom:1px solid var(--border); border-right:1px solid var(--border); }
   .cap-table td.label-cell { padding:5px 10px; position:sticky; left:0; background:var(--surface); z-index:1; border-right:2px solid var(--border2); white-space:nowrap; }
   .cap-input { width:100%; border:none; background:transparent; text-align:center; font-size:11px; font-family:monospace; color:var(--text); padding:5px 3px; outline:none; min-width:60px; cursor:pointer; }
@@ -623,10 +625,16 @@
       <span id="capBadge" style="display:none" class="pill p-warn">0 changes</span>
       <label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Import capacity from Excel">⬆ Import<input type="file" id="capFile" accept=".xlsx,.xls,.csv" onchange="importCapFromFile(this)" style="display:none"></label>
       <button class="btn btn-secondary btn-sm" onclick="downloadCapTemplate()" title="Download a 5-row template to fill in">⬇ Template</button>
-      <button class="btn btn-green btn-sm" onclick="exportCapXLSXAndSave()">⬇ Export &amp; Save</button>
+      <button class="btn btn-green btn-sm" onclick="exportCapXLSXAndSave()" title="Save locally + push to cloud (visible to everyone)">⬇ Save &amp; Sync</button>
+      <button class="btn btn-secondary btn-sm" onclick="pullCapacityFromSupabase(true)" title="Re-fetch capacity from Supabase (overwrites local)">☁ Pull</button>
       <button class="btn btn-secondary btn-sm" onclick="resetCap()" title="Restore capacity defaults (keeps the matrix populated)">↺ Reset</button>
-      <button class="btn btn-secondary btn-sm" onclick="wipeAllCapacities()" title="Delete every capacity value from memory and localStorage so you can import a fresh file" style="color:var(--red);border-color:var(--red)">🗑 Clear all</button>
+      <button class="btn btn-secondary btn-sm" onclick="wipeAllCapacities()" title="Delete every capacity value from memory, localStorage AND cloud" style="color:var(--red);border-color:var(--red)">🗑 Clear all</button>
     </div>
+  </div>
+  <!-- Cloud sync status box -->
+  <div id="capCloudBox" style="margin-bottom:10px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-size:14px">☁</span>
+    <span id="capCloudStatus" style="color:var(--muted)">Checking cloud sync…</span>
   </div>
   <div id="capUpStatus" style="margin-bottom:10px"></div>
   <div class="cap-wrap" id="capWrap"></div>
@@ -1619,7 +1627,7 @@ function showTab(t){
   if(t==='recommendations'){populateRecoFilters();renderRecos();}
   if(t==='nav'){populateNavStore();renderNAVPreview();}
   if(t==='inventory'){populateInvFilters();renderInv();}
-  if(t==='capacity') renderCap();
+  if(t==='capacity'){ renderCap(); if(typeof pullCapacityFromSupabase==='function' && !S._capCloudPulled){ S._capCloudPulled=true; pullCapacityFromSupabase().catch(()=>{}); } }
   if(t==='exceptions') renderExcList();
 }
 
@@ -2757,7 +2765,152 @@ function exportCapXLSXAndSave(){
   exportCapXLSX();
   saveCapToLocalStorage();
   const s=document.getElementById('capSummary');
-  if(s){const h=s.innerHTML;s.innerHTML+='<span style="color:var(--green);margin-left:8px">✓ Saved to localStorage</span>';setTimeout(()=>{s.innerHTML=h;},2500);}
+  if(s){const h=s.innerHTML;s.innerHTML+='<span style="color:var(--green);margin-left:8px">✓ Saved locally</span>';setTimeout(()=>{s.innerHTML=h;},2500);}
+  // Push to Supabase so other users see the update — non-blocking, errors don't break the local save
+  pushCapacityToSupabase().catch(e=>{ setCloudStatus('⚠ Cloud push failed: '+e.message,'amber'); });
+}
+
+// ---- Capacity Cloud Sync (Supabase) ----
+// Shared, multi-user capacity matrix stored in Supabase tables `de_capacity` and `de_capacity_meta`.
+// Pull on boot (after catalog loads) overlays cloud values on top of localStorage.
+// Push on Save & Sync / Import sends updates so other users see them.
+
+function setCloudStatus(text,color){
+  const el=document.getElementById('capCloudStatus');
+  if(!el) return;
+  const col=color==='green'?'var(--green)':color==='amber'?'var(--amber)':color==='red'?'var(--red)':'var(--muted)';
+  el.style.color=col;
+  el.innerHTML=text;
+}
+function fmtRelTime(iso){
+  if(!iso) return '';
+  const d=new Date(iso); const ago=(Date.now()-d.getTime())/1000;
+  if(ago<60) return Math.floor(ago)+'s ago';
+  if(ago<3600) return Math.floor(ago/60)+'m ago';
+  if(ago<86400) return Math.floor(ago/3600)+'h ago';
+  if(ago<2592000) return Math.floor(ago/86400)+'d ago';
+  return d.toLocaleDateString();
+}
+function getCurrentUserLabel(){
+  // Best-effort identification — domain part of the Shopify domain field, or 'anonymous'
+  try{
+    const d=document.getElementById('liveDomain')?.value||'';
+    const m=d.match(/^([^.]+)/); if(m) return m[1];
+  }catch(_){}
+  return 'anonymous';
+}
+
+async function pullCapacityFromSupabase(manual=false){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setCloudStatus('Supabase not configured — local-only mode'); return; }
+  try{
+    setCloudStatus('☁ Pulling from cloud…');
+    // Paginated read (1000 rows/page) — required: include order= so offsets are stable (per CLAUDE.md)
+    let all=[]; let from=0; const pageSize=1000;
+    while(true){
+      const page=await sbFetch('/de_capacity?select=*&order=store_id&limit='+pageSize+'&offset='+from);
+      if(!Array.isArray(page)||!page.length) break;
+      all=all.concat(page);
+      if(page.length<pageSize) break;
+      from+=pageSize;
+    }
+    // Apply to S.CAP — cloud is source of truth
+    let n=0;
+    all.forEach(row=>{
+      const sid=row.store_id, b=row.brand, t=row.type, v=+row.max_capacity||0;
+      if(!sid||!b||!t) return;
+      if(!S.CAP[sid]) S.CAP[sid]={};
+      if(!S.CAP[sid][b]) S.CAP[sid][b]={};
+      S.CAP[sid][b][t]=v;
+      if(S.ORIG[sid]){S.ORIG[sid][b]=S.ORIG[sid][b]||{};S.ORIG[sid][b][t]=v;}
+      if(!S.STORE_BRANDS[sid]) S.STORE_BRANDS[sid]=new Set();
+      if(v>0) S.STORE_BRANDS[sid].add(b);
+      if(v>0 && !BRANDS.includes(b)) BRANDS.push(b);
+      n++;
+    });
+    // Save to localStorage too so reloads are fast/offline-tolerant
+    saveCapToLocalStorage();
+    applyCapToData();
+    if(typeof renderCap==='function' && document.getElementById('panel-capacity')?.classList.contains('active')) renderCap();
+    // Fetch meta (last_uploaded_at, last_uploaded_by, cell_count)
+    let meta=null;
+    try{ const m=await sbFetch('/de_capacity_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    if(meta){
+      const who=meta.last_uploaded_by||'someone';
+      const when=meta.last_uploaded_at;
+      setCloudStatus(`Last sync: <strong>${fmtRelTime(when)}</strong> by <strong>${who}</strong> · ${meta.cell_count||n} cells in cloud · pulled ${n} rows now`,'green');
+    } else {
+      setCloudStatus(`Pulled ${n} rows from cloud (no meta record yet)`,'green');
+    }
+    if(manual) clog('☁ Capacity pulled from cloud: '+n+' rows');
+  }catch(e){
+    if(e.message&&e.message.includes('404')){
+      setCloudStatus('⚠ Cloud table not found — run the SQL DDL in Supabase to enable sync','amber');
+    } else {
+      setCloudStatus('⚠ Cloud pull failed: '+e.message,'amber');
+    }
+  }
+}
+
+async function pushCapacityToSupabase(){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setCloudStatus('Supabase not configured — local-only mode'); return; }
+  try{
+    setCloudStatus('☁ Pushing to cloud…');
+    // Build rows from ALL non-zero S.CAP entries (matches the export logic)
+    const rows=[];
+    Object.entries(S.CAP||{}).forEach(([sid,brandMap])=>{
+      Object.entries(brandMap||{}).forEach(([b,typeMap])=>{
+        Object.entries(typeMap||{}).forEach(([t,v])=>{
+          const n=+v||0;
+          if(n>0) rows.push({store_id:sid,brand:b,type:t,max_capacity:n,updated_at:new Date().toISOString(),updated_by:getCurrentUserLabel()});
+        });
+      });
+    });
+    if(!rows.length){
+      setCloudStatus('⚠ Nothing to push (matrix is empty)','amber');
+      return;
+    }
+    // Upsert in batches of 500 to stay well under PostgREST limits
+    let pushed=0;
+    for(let i=0;i<rows.length;i+=500){
+      const batch=rows.slice(i,i+500);
+      await sbFetch('/de_capacity?on_conflict=store_id,brand,type',{
+        method:'POST',
+        prefer:'resolution=merge-duplicates,return=minimal',
+        body:batch
+      });
+      pushed+=batch.length;
+    }
+    // Update meta record (single row, id=1)
+    const who=getCurrentUserLabel();
+    const now=new Date().toISOString();
+    try{
+      await sbFetch('/de_capacity_meta?on_conflict=id',{
+        method:'POST',
+        prefer:'resolution=merge-duplicates,return=minimal',
+        body:[{id:1,last_uploaded_at:now,last_uploaded_by:who,cell_count:pushed}]
+      });
+    }catch(metaErr){ clog('Meta update warning: '+metaErr.message); }
+    setCloudStatus(`Last sync: <strong>just now</strong> by <strong>${who}</strong> · ${pushed} cells in cloud`,'green');
+    clog('☁ Capacity pushed to cloud: '+pushed+' cells');
+  }catch(e){
+    if(e.message&&e.message.includes('404')){
+      setCloudStatus('⚠ Cloud table not found — run the SQL DDL in Supabase to enable sync','amber');
+    } else {
+      setCloudStatus('⚠ Cloud push failed: '+e.message,'amber');
+    }
+  }
+}
+
+async function wipeCloudCapacity(){
+  const {url,key}=getSBCreds();
+  if(!url||!key) return;
+  try{
+    await sbFetch('/de_capacity?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+    await sbFetch('/de_capacity_meta?id=eq.1',{method:'DELETE',prefer:'return=minimal'});
+    setCloudStatus('Cloud capacity cleared','amber');
+  }catch(e){ setCloudStatus('Cloud clear failed: '+e.message,'red'); }
 }
 function saveCapToLocalStorage(){
   try{
@@ -2817,8 +2970,14 @@ function importCapFromFile(input){
       renderCap();
       if(DATA.length) renderInv();
       const st=document.getElementById('capUpStatus');
-      if(st) st.innerHTML=`<div class="sb s-ok">✓ Imported ${n} rows from ${file.name} · saved to localStorage</div>`;
+      if(st) st.innerHTML=`<div class="sb s-ok">✓ Imported ${n} rows from ${file.name} · saved locally · pushing to cloud…</div>`;
       input.value='';
+      // Push the imported matrix to Supabase so other users see it
+      pushCapacityToSupabase().then(()=>{
+        if(st) st.innerHTML=`<div class="sb s-ok">✓ Imported ${n} rows from ${file.name} · saved locally + synced to cloud</div>`;
+      }).catch(e=>{
+        if(st) st.innerHTML=`<div class="sb s-warn">✓ Imported locally, but cloud push failed: ${e.message}</div>`;
+      });
     }catch(e){const st=document.getElementById('capUpStatus');if(st) st.innerHTML=`<div class="sb s-err">✗ Import error: ${e.message}</div>`;else alert('Import error: '+e.message);}
   };
   reader.readAsArrayBuffer(file);
@@ -2831,10 +2990,13 @@ function wipeAllCapacities(){
   const msg='Delete ALL capacity values?\n\n'+
     '• Every brand × type × store cell will be removed from memory\n'+
     '• localStorage will be cleared (de_capacity_v1 + de_capacity_saved_at)\n'+
+    '• CLOUD (Supabase) capacity will also be wiped — affects ALL users\n'+
     '• You can then import a fresh Excel containing only the brands you carry\n\n'+
     'This is different from Reset (which only restores defaults).\n'+
     'This action cannot be undone.';
   if(!confirm(msg)) return;
+  // Also wipe the cloud (non-blocking, but fired before local clear so error shows in status)
+  wipeCloudCapacity().catch(e=>clog('Cloud wipe error: '+e.message));
   // Wipe in-memory structures, keeping the per-store skeleton so renderCap doesn't break
   STORES.forEach(st=>{
     S.CAP[st.id]={};
@@ -3568,9 +3730,11 @@ function processLiveData(locs,invLevels,orders){
     });
   });
   clog('  CAP: '+BRANDS.length+' brands × '+allTypes.length+' types × '+STORES.length+' stores');
-  // Overlay saved capacity edits from localStorage (preserves user changes across reloads)
+  // Overlay saved capacity edits from localStorage (fast cache)
   loadCapFromLocalStorage();
   applyCapToData();
+  // Then pull from Supabase (shared source of truth across users) — non-blocking, overlays cloud values
+  pullCapacityFromSupabase().catch(e=>clog('Cloud pull warning: '+e.message));
   S.liveData={stores:[...STORES],data:[...DATA],brands:[...BRANDS],types:[...TYPES]};
   // Restore saved store selection (intersected with current STORES) — fall back to all
   loadVelTiers();
