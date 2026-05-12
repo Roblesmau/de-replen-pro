@@ -362,6 +362,7 @@
     <div id="excCloudBox" style="margin-bottom:10px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span style="font-size:14px">☁</span>
       <span id="excCloudStatus" style="color:var(--muted)">Checking cloud sync…</span>
+      <button onclick="changeUserLabel()" title="Set your name for cloud sync attribution" style="margin-left:auto;background:transparent;color:var(--muted);border:1px solid var(--border);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#9998; Edit name</button>
     </div>
     <!-- Toolbar -->
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
@@ -701,6 +702,7 @@
   <div id="capCloudBox" style="margin-bottom:10px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <span style="font-size:14px">☁</span>
     <span id="capCloudStatus" style="color:var(--muted)">Checking cloud sync…</span>
+    <button onclick="changeUserLabel()" title="Set your name for cloud sync attribution" style="margin-left:auto;background:transparent;color:var(--muted);border:1px solid var(--border);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#9998; Edit name</button>
   </div>
   <div id="capUpStatus" style="margin-bottom:10px"></div>
   <div class="cap-wrap" id="capWrap"></div>
@@ -3037,12 +3039,30 @@ function fmtRelTime(iso){
   return d.toLocaleDateString();
 }
 function getCurrentUserLabel(){
-  // Best-effort identification — domain part of the Shopify domain field, or 'anonymous'
   try{
-    const d=document.getElementById('liveDomain')?.value||'';
-    const m=d.match(/^([^.]+)/); if(m) return m[1];
+    const stored=localStorage.getItem('de_user_label');
+    if(stored && stored.trim()) return stored.trim();
   }catch(_){}
-  return 'anonymous';
+  // First-time prompt — name persists locally for all future cloud writes
+  let name='';
+  try{ name=prompt('Enter your name for cloud sync attribution (e.g. "Mau Rock"):','')||''; }catch(_){}
+  name=String(name||'').trim().slice(0,40);
+  if(!name) name='anonymous';
+  try{ localStorage.setItem('de_user_label',name); }catch(_){}
+  return name;
+}
+function changeUserLabel(){
+  let current='';
+  try{ current=localStorage.getItem('de_user_label')||''; }catch(_){}
+  const name=prompt('Your name for cloud sync attribution:',current||'');
+  if(name===null) return;
+  const clean=String(name||'').trim().slice(0,40);
+  if(!clean){ try{ localStorage.removeItem('de_user_label'); }catch(_){} clog('User label cleared'); return; }
+  try{ localStorage.setItem('de_user_label',clean); }catch(_){}
+  clog('User label set to: '+clean);
+  // Refresh both cloud status boxes if visible
+  if(typeof pullCapacityFromSupabase==='function') pullCapacityFromSupabase(false).catch(()=>{});
+  if(typeof pullExceptionsFromSupabase==='function') pullExceptionsFromSupabase(false).catch(()=>{});
 }
 
 async function pullCapacityFromSupabase(manual=false){
