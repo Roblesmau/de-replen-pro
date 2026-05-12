@@ -112,6 +112,66 @@
   .metric-lbl { font-size:11px; color:var(--muted); margin-top:4px; }
   .metric-sub { font-size:11px; color:var(--hint); margin-top:2px; }
 
+  /* Multi-select filters (Stores / Brands / Types) — themed for both modes */
+  .filter-label {
+    font-size:11px; font-weight:600; color:var(--text);
+    text-transform:uppercase; letter-spacing:0.6px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .filter-label .count-pill {
+    font-weight:500; font-size:10px; color:var(--blue);
+    background:var(--blue-bg); padding:1px 7px; border-radius:999px;
+    letter-spacing:0; text-transform:none;
+  }
+  .filter-multi {
+    width:auto; min-width:160px; height:260px;
+    padding:6px; font-size:13px;
+    background:var(--surface);
+    color:var(--text);
+    border:1px solid var(--border2);
+    border-radius:var(--radius);
+    box-shadow:inset 0 1px 2px rgba(15,23,42,0.04);
+    outline:none;
+    transition:border-color .15s ease, box-shadow .15s ease;
+  }
+  .filter-multi:focus,
+  .filter-multi:focus-visible {
+    border-color:var(--blue);
+    box-shadow:0 0 0 3px var(--blue-bg);
+  }
+  .filter-multi option {
+    padding:6px 10px;
+    border-radius:6px;
+    margin:1px 0;
+    color:var(--text);
+    cursor:pointer;
+  }
+  .filter-multi option:hover {
+    background:var(--blue-bg);
+    color:var(--blue);
+  }
+  .filter-multi option:checked {
+    background:var(--blue) linear-gradient(0deg,var(--blue),var(--blue));
+    color:#fff;
+    font-weight:600;
+    box-shadow:inset 3px 0 0 0 rgba(255,255,255,0.6);
+  }
+  [data-theme="dark"] .filter-multi {
+    box-shadow:inset 0 1px 2px rgba(0,0,0,0.3);
+  }
+  [data-theme="dark"] .filter-multi option:checked {
+    color:#0B0F1A;
+    box-shadow:inset 3px 0 0 0 rgba(11,15,26,0.55);
+  }
+  /* Slim scrollbar inside filters */
+  .filter-multi::-webkit-scrollbar { width:8px; }
+  .filter-multi::-webkit-scrollbar-track { background:transparent; }
+  .filter-multi::-webkit-scrollbar-thumb {
+    background:var(--border2); border-radius:8px;
+    border:2px solid var(--surface);
+  }
+  .filter-multi::-webkit-scrollbar-thumb:hover { background:var(--muted); }
+
   /* Grid */
   .row { display:grid; gap:14px; }
   .row2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -543,16 +603,16 @@
 <div class="panel" id="panel-inventory">
   <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-start">
     <div style="display:flex;flex-direction:column;gap:6px">
-      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Stores</label>
-      <select id="invStoreFilter" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="width:auto;min-width:180px;height:260px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+      <label class="filter-label">Stores <span class="count-pill" id="invStoreCount"></span></label>
+      <select id="invStoreFilter" class="filter-multi" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="min-width:180px"></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px">
-      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Brands</label>
-      <select id="invBrandFilter" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="width:auto;min-width:160px;height:260px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+      <label class="filter-label">Brands <span class="count-pill" id="invBrandCount"></span></label>
+      <select id="invBrandFilter" class="filter-multi" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="min-width:160px"></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px">
-      <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Types</label>
-      <select id="invTypeFilter" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="width:auto;min-width:150px;height:260px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text);font-size:13px"></select>
+      <label class="filter-label">Types <span class="count-pill" id="invTypeCount"></span></label>
+      <select id="invTypeFilter" class="filter-multi" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="min-width:150px"></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Model</label>
@@ -2072,6 +2132,7 @@ function populateInvFilters(){
       warnEl.style.display='none';
     }
   }
+  if(typeof updateFilterCounts==='function') updateFilterCounts();
 }
 
 function renderInv(){
@@ -2228,10 +2289,20 @@ function handleInvFilter(id,saveFn){
     [...el.options].filter(o=>o.value==='__all__').forEach(o=>o.selected=false);
   }
   if(saveFn) saveFn();
+  updateFilterCounts();
   renderInv();
   updateDash();
   // Inventory filter changes affect replenishment scope (brands/types)
   if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+}
+function updateFilterCounts(){
+  [['invStoreFilter','invStoreCount'],['invBrandFilter','invBrandCount'],['invTypeFilter','invTypeCount']].forEach(([fid,cid])=>{
+    const el=document.getElementById(fid); const pill=document.getElementById(cid);
+    if(!el||!pill) return;
+    const total=[...el.options].filter(o=>o.value!=='__all__').length;
+    const sel=[...el.options].filter(o=>o.value!=='__all__'&&o.selected).length;
+    pill.textContent= (sel===total)? `All · ${total}` : `${sel}/${total}`;
+  });
 }
 function resetInvFilters(){
   ['invStoreFilter','invBrandFilter','invTypeFilter'].forEach(id=>{
@@ -2239,6 +2310,7 @@ function resetInvFilters(){
     if(el)[...el.options].forEach(o=>o.selected=o.value!=='__all__');
   });
   saveInvStoreFilter();saveInvBrandFilter();saveInvTypeFilter();
+  if(typeof updateFilterCounts==='function') updateFilterCounts();
   if(typeof updateDash==='function') updateDash();
   renderInv();
 }
