@@ -700,6 +700,7 @@
           &#127981; Upload Bin Contents
           <input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">
         </label>
+        <button id="btnClearWH" onclick="clearWHContents()" style="display:none;margin-top:2px;background:transparent;color:var(--red);border:1px solid var(--red);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#10005; Clear WH</button>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -733,7 +734,7 @@
           <option value="inventory">Inventory Levels (Variant SKU + store)</option>
           <option value="orders">Orders 90d</option>
           <option value="ordersPY">Orders Prior Year</option>
-          <option value="wh">WH Bin Contents</option>
+          <option value="wh" id="inspectorOptWH" style="display:none">WH Bin Contents</option>
           <option value="unknown_skus">⚠ Warnings — Unknown SKUs</option>
         </select>
         <select id="inspectorRows" onchange="renderInspector()" style="width:auto;font-size:11px">
@@ -2316,6 +2317,7 @@ function parseWH(input){
       }
       processWHRows(rows);
     }catch(e){showWHStatus('✗ '+e.message,'s-err');}
+    finally{ try{ input.value=''; }catch(_){} }
   };
   reader.readAsArrayBuffer(file);
 }
@@ -2392,17 +2394,67 @@ function processWHRows(rows){
       const st3=document.getElementById('st3');
       if(st3) st3.textContent='3 · WH: '+totalWHUnits.toLocaleString()+' units ✓';
       const bwh=document.getElementById('btnWH');
-      if(bwh){bwh.textContent='✓ Bin Contents loaded';bwh.className='btn btn-sm';bwh.style.cssText='background:var(--green-bg);color:var(--green);border:1px solid #97C459;padding:5px 11px;font-size:11px;border-radius:var(--radius);cursor:pointer';}
+      if(bwh){
+        bwh.innerHTML='✓ Bin Contents loaded<input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">';
+        bwh.className='btn btn-sm';
+        bwh.style.cssText='background:var(--green-bg);color:var(--green);border:1px solid #97C459;padding:5px 11px;font-size:11px;border-radius:var(--radius);cursor:pointer';
+      }
     }
+    // Show WH option in inspector + show Clear button
+    const optWH=document.getElementById('inspectorOptWH');
+    if(optWH) optWH.style.display='';
+    const bClr=document.getElementById('btnClearWH');
+    if(bClr) bClr.style.display='inline-block';
     // Refresh all UI panels with updated whQty
     renderStoreGrid();
     populateInvFilters();
     renderInv();
     populateDashFilters();
     if(typeof renderDash==='function') renderDash();
+    if(typeof renderInspector==='function' && document.getElementById('rawInspector')?.style.display!=='none') renderInspector();
+    if(typeof renderImpactReport==='function' && document.getElementById('impactReport')?.style.display!=='none') renderImpactReport();
   }catch(e){
     showWHStatus('✗ '+e.message+' [<a href="#" onclick="document.getElementById(\'whFileInput\').click();return false" style="color:inherit;text-decoration:underline;cursor:pointer">Retry</a>]','s-err');
   }
+}
+function clearWHContents(){
+  if(!S.wh||!S.wh.length){
+    showWHStatus('Nothing to clear — no WH bin contents loaded.','s-warn');
+    return;
+  }
+  if(!confirm('Clear WH Bin Contents?\n\nThis wipes the uploaded warehouse quantities, resets every SKU\'s WH qty to 0, and recomputes replenishment. You can re-upload a fresh file afterward.')) return;
+  // Wipe state
+  S.wh=[];
+  DATA.forEach(d=>{ d.whQty=0; });
+  // Recompute recos with empty WH
+  if(typeof buildRecos==='function') buildRecos();
+  // Reset Step 3 UI
+  setStep(3,'pending');
+  const st3=document.getElementById('st3');
+  if(st3) st3.textContent='3 · Upload WH Bin Contents';
+  const bwh=document.getElementById('btnWH');
+  if(bwh){
+    bwh.className='btn btn-secondary btn-sm';
+    bwh.style.cssText='cursor:pointer;opacity:1;pointer-events:auto';
+    bwh.innerHTML='&#127981; Upload Bin Contents<input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">';
+  }
+  // Hide Clear button + WH option in inspector dropdown
+  const bClr=document.getElementById('btnClearWH');
+  if(bClr) bClr.style.display='none';
+  const optWH=document.getElementById('inspectorOptWH');
+  if(optWH) optWH.style.display='none';
+  // If inspector was currently viewing WH, switch back to unified
+  const sel=document.getElementById('inspectorTable');
+  if(sel && sel.value==='wh') sel.value='unified';
+  // Refresh dependent UI
+  if(typeof renderStoreGrid==='function') renderStoreGrid();
+  if(typeof populateInvFilters==='function') populateInvFilters();
+  if(typeof renderInv==='function') renderInv();
+  if(typeof populateDashFilters==='function') populateDashFilters();
+  if(typeof renderDash==='function') renderDash();
+  if(typeof renderInspector==='function' && document.getElementById('rawInspector')?.style.display!=='none') renderInspector();
+  if(typeof renderImpactReport==='function' && document.getElementById('impactReport')?.style.display!=='none') renderImpactReport();
+  showWHStatus('✓ WH Bin Contents cleared — upload a new file to re-run replenishment with warehouse stock.','s-ok');
 }
 
 
@@ -3594,24 +3646,22 @@ async function refreshCacheLastSync(){
   const lbl=document.getElementById('cacheLastSync');
   if(!lbl) return;
   const {url,key}=getSBCreds();
-  if(!url||!key){ lbl.textContent='Cache: Supabase not configured'; lbl.style.color='var(--muted)'; return; }
+  if(!url||!key){ applyCloudPill(lbl,'Cache: Supabase not configured','muted'); return; }
   try{
     const rows=await sbFetch('/de_sync_log?select=synced_at,variant_count,product_count&order=synced_at.desc&limit=1');
     if(!Array.isArray(rows)||!rows.length){
-      lbl.innerHTML='Cache: never synced';
-      lbl.style.color='var(--amber)';
+      applyCloudPill(lbl,'Cache: never synced','amber');
       return;
     }
     const r=rows[0];
     const when=r.synced_at;
     const ago=fmtRelTime(when);
     const items=(r.variant_count||0).toLocaleString();
-    lbl.innerHTML=`Cache last refreshed <strong>${ago}</strong> · ${items} items`;
-    lbl.style.color=(Date.now()-new Date(when).getTime())/3600000>48?'var(--amber)':'var(--green)';
+    const stale=(Date.now()-new Date(when).getTime())/3600000>48;
+    applyCloudPill(lbl,`Cache last refreshed <strong>${ago}</strong> · ${items} items`,stale?'amber':'green');
     lbl.title='Catalog cache freshness — pulled from Supabase de_sync_log. Last full Shopify sync on '+new Date(when).toLocaleString();
   }catch(e){
-    lbl.textContent='Cache status unavailable';
-    lbl.style.color='var(--muted)';
+    applyCloudPill(lbl,'Cache status unavailable','muted');
   }
 }
 // Global SKU normalizer — strip leading apostrophes and whitespace
