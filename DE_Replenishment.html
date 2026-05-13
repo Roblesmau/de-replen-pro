@@ -432,8 +432,9 @@
           </select>
         </div>
         <button class="btn btn-secondary btn-sm" onclick="toggleVelTierPanel()" title="Velocity-based send quantities">⚙ Send qty rules</button>
-        <button class="btn btn-primary btn-sm" onclick="runRun()">Run replenishment →</button>
-        <button class="btn btn-navy btn-sm" onclick="exportNAV()">📋 Export NAV</button>
+        <button id="btnRunRepl" class="btn btn-primary btn-sm" onclick="runRun()">Run replenishment →</button>
+        <button id="btnClearReco" onclick="clearReplenishmentResults()" style="display:none;background:transparent;color:var(--red);border:1px solid var(--red);padding:5px 11px;font-size:11px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em" title="Wipe the current plan so you can re-run with updated inputs">↺ Clear results</button>
+        <button id="btnExportNAVStore" class="btn btn-navy btn-sm" onclick="exportNAV()" disabled style="opacity:.4;cursor:not-allowed">📋 Export NAV</button>
       </div>
     </div>
     <!-- Velocity tier editor -->
@@ -1663,6 +1664,41 @@ function runRun(){
     const el=document.getElementById('recoSection');
     if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
   },100);
+  // Show "Clear results" and enable "Export NAV" in the Store Selection toolbar
+  const btnClr=document.getElementById('btnClearReco');
+  if(btnClr) btnClr.style.display='inline-block';
+  const btnExp=document.getElementById('btnExportNAVStore');
+  if(btnExp){ btnExp.disabled=false; btnExp.style.opacity='1'; btnExp.style.cursor='pointer'; }
+}
+
+function clearReplenishmentResults(){
+  if(!S.activeRecos||!S.activeRecos.length){
+    alert('Nothing to clear — no replenishment results yet.');
+    return;
+  }
+  if(!confirm('Clear the current replenishment plan?\n\nYour inputs (store selection, priority mode, velocity tiers, capacity, exceptions, WH bin contents) all stay.\nOnly the calculated plan is wiped so you can re-run with fresh values.')) return;
+  // Wipe results
+  S.recos=[]; S.activeRecos=[];
+  // Hide post-run cards
+  const runSummary=document.getElementById('runSummary');
+  if(runSummary) runSummary.style.display='none';
+  const impactSec=document.getElementById('impactReport');
+  if(impactSec) impactSec.style.display='none';
+  const recoSec=document.getElementById('recoSection');
+  if(recoSec) recoSec.style.display='none';
+  const navSec=document.getElementById('navPreviewSection');
+  if(navSec) navSec.style.display='none';
+  // Reset toolbar buttons
+  const btnClr=document.getElementById('btnClearReco');
+  if(btnClr) btnClr.style.display='none';
+  const btnExp=document.getElementById('btnExportNAVStore');
+  if(btnExp){ btnExp.disabled=true; btnExp.style.opacity='.4'; btnExp.style.cursor='not-allowed'; }
+  // Refresh views that read S.recos / S.activeRecos
+  if(typeof renderStoreGrid==='function') renderStoreGrid();
+  if(typeof renderScopeBadges==='function') renderScopeBadges();
+  if(typeof renderPriorityList==='function') renderPriorityList();
+  if(typeof renderImpactReport==='function') renderImpactReport();
+  clog('↺ Replenishment results cleared — adjust inputs and click Run again.');
 }
 
 // Replenishment Impact Report
