@@ -743,7 +743,7 @@
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 2A &mdash; Catalog</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
           <button id="btnCache" class="btn btn-green btn-sm" onclick="loadCatalogFromCache()" title="Read product catalog from Supabase &mdash; fast, then auto-loads live data" disabled style="opacity:.4;cursor:not-allowed">&#9889; Load from cloud</button>
-          <span id="cacheLastSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking cache…</span>
+          <span id="cacheLastSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud…</span>
           <button id="btnLoad" class="btn btn-primary btn-sm" onclick="loadCatalogFromShopify()" title="Full Shopify fetch &mdash; syncs catalog to Supabase, then auto-loads live data" disabled style="opacity:.4;cursor:not-allowed">&#128229; Full Shopify load</button>
         </div>
       </div>
