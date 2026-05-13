@@ -1120,26 +1120,35 @@ function getStorePriorityOrder(){
     const rest=sel.filter(id=>!ordered.includes(id));
     return [...ordered,...rest];
   }
+  // Honor Inventory tab brand/type filter so priority reflects the scoped run
+  const invBrands=(typeof getFilterValues==='function')?getFilterValues('invBrandFilter'):[];
+  const invTypes=(typeof getFilterValues==='function')?getFilterValues('invTypeFilter'):[];
+  const inScope=d=>{
+    if(invBrands.length&&!invBrands.includes(d.brand)) return false;
+    if(invTypes.length&&!invTypes.includes(d.type)) return false;
+    return true;
+  };
   if(S.priority==='urgency'){
-    // Sort by days of stock ascending (most urgent first)
+    // Sort by days of stock ascending (most urgent first), within current filter scope
     return sel.sort((a,b)=>{
-      const dosA=getDOS(a), dosB=getDOS(b);
+      const dosA=getDOS(a,inScope), dosB=getDOS(b,inScope);
       return dosA-dosB;
     });
   }
   if(S.priority==='velocity'){
-    // Sort by total 90d velocity descending
+    // Sort by total 90d velocity descending, within current filter scope
     return sel.sort((a,b)=>{
-      const velA=DATA.filter(d=>d.storeId===a).reduce((s,d)=>s+d.velocity90,0);
-      const velB=DATA.filter(d=>d.storeId===b).reduce((s,d)=>s+d.velocity90,0);
+      const velA=DATA.filter(d=>d.storeId===a&&inScope(d)).reduce((s,d)=>s+d.velocity90,0);
+      const velB=DATA.filter(d=>d.storeId===b&&inScope(d)).reduce((s,d)=>s+d.velocity90,0);
       return velB-velA;
     });
   }
   return sel;
 }
 
-function getDOS(storeId){
-  const rows=DATA.filter(d=>d.storeId===storeId);
+function getDOS(storeId,scopeFn){
+  // Default scope: all rows. Caller can pass an Inventory-filter-aware predicate.
+  const rows=DATA.filter(d=>d.storeId===storeId&&(scopeFn?scopeFn(d):true));
   const units=rows.reduce((a,d)=>a+d.storeQty,0);
   const vel=rows.reduce((a,d)=>a+d.velocity90,0);
   return vel>0?Math.round(units/(vel/90)):999;
@@ -1524,12 +1533,20 @@ function renderPriorityList(){
   const mode=S.priority||'urgency';
   const modeLbl={manual:'Manual (selection order)',urgency:'Urgency (days of stock)',velocity:'Velocity (90d sales)'}[mode]||mode;
   document.getElementById('priorityModeLbl').textContent=modeLbl;
+  // Scope metrics to the same Inventory filter that the priority order uses
+  const invBrandsP=(typeof getFilterValues==='function')?getFilterValues('invBrandFilter'):[];
+  const invTypesP=(typeof getFilterValues==='function')?getFilterValues('invTypeFilter'):[];
+  const inScopeP=d=>{
+    if(invBrandsP.length&&!invBrandsP.includes(d.brand)) return false;
+    if(invTypesP.length&&!invTypesP.includes(d.type)) return false;
+    return true;
+  };
   const html=order.map((id,i)=>{
     const st=STORES.find(s=>s.id===id);if(!st) return '';
     const stats=S.storeStats?.[id]||{pct:0};
     let metric='';
-    if(mode==='urgency'){const d=getDOS(id);metric=`${d>=999?'∞':d} days of stock`;}
-    else if(mode==='velocity'){const v=DATA.filter(d=>d.storeId===id).reduce((a,d)=>a+d.velocity90,0);metric=`${v.toLocaleString()} units / 90d`;}
+    if(mode==='urgency'){const d=getDOS(id,inScopeP);metric=`${d>=999?'∞':d} days of stock`;}
+    else if(mode==='velocity'){const v=DATA.filter(d=>d.storeId===id&&inScopeP(d)).reduce((a,d)=>a+d.velocity90,0);metric=`${v.toLocaleString()} units / 90d`;}
     else metric=`Selected #${i+1}`;
     const pctCol=stats.pct<30?'#E24B4A':stats.pct<60?'#EF9F27':stats.pct<90?'#639922':'#185FA5';
     return `<li style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);font-size:13px">
@@ -1590,7 +1607,14 @@ function toggleStore(id){
   renderStoreGrid();filterActive();
   hidePostRunCards();
 }
-function selectAll(){S.selOrder=STORES.map(s=>s.id);STORES.forEach(st=>S.sel.add(st.id));saveStoreSelection();renderStoreGrid();filterActive();hidePostRunCards();}
+function selectAll(){
+  // Preserve any existing manual order (S.selOrder); just append store IDs not yet listed.
+  // This protects users who've curated a manual priority sequence from having it wiped.
+  STORES.forEach(st=>S.sel.add(st.id));
+  const known=new Set(S.selOrder||[]);
+  STORES.forEach(st=>{ if(!known.has(st.id)) S.selOrder.push(st.id); });
+  saveStoreSelection();renderStoreGrid();filterActive();hidePostRunCards();
+}
 function selectNone(){S.sel.clear();S.selOrder=[];saveStoreSelection();renderStoreGrid();filterActive();hidePostRunCards();}
 function runRun(){
   if(!S.sel.size){alert('Select at least one store.');return;}
@@ -1691,6 +1715,9 @@ function clearReplenishmentResults(){
   if(!confirm('Clear the current replenishment plan?\n\nYour inputs (store selection, priority mode, velocity tiers, capacity, exceptions, WH bin contents) all stay.\nOnly the calculated plan is wiped so you can re-run with fresh values.')) return;
   // Wipe results
   S.recos=[]; S.activeRecos=[];
+  // Zero the per-store recos count so store tiles' "N recs" badges disappear immediately.
+  // pct (% full) is left alone — it reflects inventory state, not run output.
+  if(S.storeStats) Object.keys(S.storeStats).forEach(id=>{ if(S.storeStats[id]) S.storeStats[id].recos=0; });
   // Hide post-run cards
   const runSummary=document.getElementById('runSummary');
   if(runSummary) runSummary.style.display='none';
