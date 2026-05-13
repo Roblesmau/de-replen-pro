@@ -3268,7 +3268,12 @@ function setWHCloudStatus(text,color){
 }
 async function pullWHFromSupabase(manual=false){
   const {url,key}=getSBCreds();
-  if(!url||!key){ setWHCloudStatus('Checking the cloud…'); return; }
+  if(!url||!key){
+    setWHCloudStatus('Checking the cloud…');
+    // Creds not yet loaded — clear the "already pulled" flag so the next caller can retry
+    S._whCloudPulled=false;
+    return;
+  }
   try{
     setWHCloudStatus('&#9729; Pulling from cloud&hellip;');
     let all=[]; let from=0; const pageSize=1000;
@@ -4053,15 +4058,22 @@ async function testConn(){
 }
 
 // Fetch + display the catalog cache freshness from Supabase de_sync_log
+function setCacheSyncLabel(html,color){
+  const lbl=document.getElementById('cacheLastSync');
+  if(!lbl) return;
+  const col=color==='green'?'var(--green)':color==='amber'?'var(--amber)':color==='red'?'var(--red)':'var(--muted)';
+  lbl.style.color=col;
+  lbl.innerHTML=html;
+}
 async function refreshCacheLastSync(){
   const lbl=document.getElementById('cacheLastSync');
   if(!lbl) return;
   const {url,key}=getSBCreds();
-  if(!url||!key){ applyCloudPill(lbl,'Cache: Supabase not configured','muted'); return; }
+  if(!url||!key){ setCacheSyncLabel('Checking the cloud&hellip;'); return; }
   try{
     const rows=await sbFetch('/de_sync_log?select=synced_at,variant_count,product_count&order=synced_at.desc&limit=1');
     if(!Array.isArray(rows)||!rows.length){
-      applyCloudPill(lbl,'Cache: never synced','amber');
+      setCacheSyncLabel('Cache: never synced','amber');
       return;
     }
     const r=rows[0];
@@ -4069,10 +4081,10 @@ async function refreshCacheLastSync(){
     const ago=fmtRelTime(when);
     const items=(r.variant_count||0).toLocaleString();
     const stale=(Date.now()-new Date(when).getTime())/3600000>48;
-    applyCloudPill(lbl,`Cache last refreshed <strong>${ago}</strong> · ${items} items`,stale?'amber':'green');
+    setCacheSyncLabel(`Last sync: <strong>${ago}</strong> &middot; ${items} items in cloud`,stale?'amber':'green');
     lbl.title='Catalog cache freshness — pulled from Supabase de_sync_log. Last full Shopify sync on '+new Date(when).toLocaleString();
   }catch(e){
-    applyCloudPill(lbl,'Cache status unavailable','muted');
+    setCacheSyncLabel('Cache status unavailable');
   }
 }
 // Global SKU normalizer — strip leading apostrophes and whitespace
@@ -4965,12 +4977,18 @@ loadCredentials();
 ['liveToken','liveDomain','proxyUrl','sbUrl','sbKey'].forEach(id=>{
   const el=document.getElementById(id);if(el) el.addEventListener('change',saveCredentials);
 });
-// Populate cache freshness label on initial page load if Supabase creds are already saved
-if(typeof refreshCacheLastSync==='function') setTimeout(()=>refreshCacheLastSync().catch(()=>{}),100);
-// Populate WH cloud freshness label on initial page load (auto-pulls + applies if creds present)
-if(typeof pullWHFromSupabase==='function') setTimeout(()=>{
-  if(!S._whCloudPulled){ S._whCloudPulled=true; pullWHFromSupabase().catch(()=>{}); }
-},150);
+// Populate cloud freshness labels AFTER loadCredentials has populated the input fields.
+// Step 2A reads Supabase de_sync_log (catalog cache); Step 3 pulls WH bins from de_wh_bins + de_wh_meta.
+function refreshLiveConnectCloudLabels(){
+  if(typeof refreshCacheLastSync==='function'){
+    refreshCacheLastSync().catch(()=>{});
+  }
+  if(typeof pullWHFromSupabase==='function'){
+    S._whCloudPulled=true;
+    pullWHFromSupabase().catch(()=>{ S._whCloudPulled=false; });
+  }
+}
+setTimeout(refreshLiveConnectCloudLabels,200);
 </script>
 </body>
 </html>
