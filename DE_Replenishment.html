@@ -1585,6 +1585,9 @@ function selectAll(){S.selOrder=STORES.map(s=>s.id);STORES.forEach(st=>S.sel.add
 function selectNone(){S.sel.clear();S.selOrder=[];saveStoreSelection();renderStoreGrid();filterActive();}
 function runRun(){
   if(!S.sel.size){alert('Select at least one store.');return;}
+  // Always rebuild S.recos from fresh inputs (capacity, WH, exceptions, filters)
+  // so the Run is stateless — works even after Clear results wiped S.recos.
+  if(typeof buildRecos==='function') buildRecos();
   filterActive();
   const r=S.activeRecos,sc=new Set(r.map(x=>x.storeId)).size;
   // Show run summary
