@@ -757,12 +757,16 @@
 
       <!-- Step 3: WH Bin Contents -->
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3</span>
-        <label id="btnWH" class="btn btn-secondary btn-sm" style="cursor:pointer;opacity:.4;pointer-events:none">
-          &#127981; Upload Bin Contents
-          <input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">
-        </label>
-        <button id="btnClearWH" onclick="clearWHContents()" style="display:none;margin-top:2px;background:transparent;color:var(--red);border:1px solid var(--red);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#10005; Clear WH</button>
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3 &mdash; WH Bin Contents</span>
+        <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
+          <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch latest WH bin contents from Supabase (shared cloud copy)">&#9889; Load from cloud</button>
+          <span id="whCloudSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking cloud&hellip;</span>
+          <label id="btnWH" class="btn btn-secondary btn-sm" style="cursor:pointer;opacity:.4;pointer-events:none">
+            &#127981; Upload Bin Contents
+            <input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">
+          </label>
+          <button id="btnClearWH" onclick="clearWHContents()" style="display:none;margin-top:2px;background:transparent;color:var(--red);border:1px solid var(--red);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#10005; Clear WH</button>
+        </div>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -919,7 +923,7 @@ const COST={'Ray-Ban':52,'Oakley':70,'Gucci':210,'Prada':215,'Tom Ford':180,'Mau
 const DCAP={'Ray-Ban':{Sunglasses:60,Optical:40,Kids:20},'Oakley':{Sunglasses:50,Optical:30,Kids:15},'Gucci':{Sunglasses:25,Optical:20,Kids:0},'Prada':{Sunglasses:25,Optical:20,Kids:0},'Tom Ford':{Sunglasses:25,Optical:20,Kids:0},'Maui Jim':{Sunglasses:40,Optical:25,Kids:10},'Versace':{Sunglasses:20,Optical:15,Kids:0},'Tiffany':{Sunglasses:15,Optical:12,Kids:0}};
 
 const VEL_TIERS_DEFAULT=[{minPerWeek:0,qty:1},{minPerWeek:1,qty:2},{minPerWeek:3,qty:3},{minPerWeek:7,qty:5}];
-const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),allowOverCap:false,exceptions:new Set(),
+const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),allowOverCap:false,exceptions:new Set(),
   raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
 };
 let DATA=[],charts={};
@@ -1813,6 +1817,7 @@ function showTab(t){
   if(t==='inventory'){populateInvFilters();renderInv();}
   if(t==='capacity'){ renderCap(); if(typeof pullCapacityFromSupabase==='function' && !S._capCloudPulled){ S._capCloudPulled=true; pullCapacityFromSupabase().catch(()=>{}); } }
   if(t==='exceptions'){ renderExcList(); if(typeof pullExceptionsFromSupabase==='function' && !S._excCloudPulled){ S._excCloudPulled=true; pullExceptionsFromSupabase().catch(()=>{}); } }
+  if(t==='connect'){ if(typeof pullWHFromSupabase==='function' && !S._whCloudPulled){ S._whCloudPulled=true; pullWHFromSupabase().catch(()=>{}); } }
 }
 
 function setMode(m){
@@ -2347,6 +2352,7 @@ function parseWH(input){
   reader.onload=e=>{
     try{
       let rows=[];
+      let rawBinRows=[]; // {bin_code, item_no, qty} — preserved for cloud sync
       if(file.name.toLowerCase().endsWith('.csv')){
         // Could be Shopify inventory CSV — but for WH we only need SKU+QTY
         const text=new TextDecoder().decode(e.target.result);
@@ -2354,12 +2360,14 @@ function parseWH(input){
         const hdrs=parseCSVLine(lines[0]).map(h=>h.toLowerCase());
         const skuIdx=hdrs.findIndex(h=>h==='sku'||h==='item no.'||h==='item no');
         const qtyIdx=hdrs.findIndex(h=>h.includes('quantity')||h.includes('on hand')||h==='qty');
+        const binIdx=hdrs.findIndex(h=>h==='bin code'||h==='bin'||h==='bincode');
         if(skuIdx===-1||qtyIdx===-1) throw new Error('Cannot find SKU/Item No. and Quantity columns');
         for(let i=1;i<lines.length;i++){
           const cols=parseCSVLine(lines[i]);
           const sku=normSku(cols[skuIdx]);
           const qty=parseInt(cols[qtyIdx])||0;
-          if(sku) rows.push({sku,qty});
+          const bin=binIdx>=0?String(cols[binIdx]||'').trim():'';
+          if(sku){ rows.push({sku,qty}); rawBinRows.push({bin_code:bin,item_no:sku,qty}); }
         }
       } else {
         // Excel — supports both Warehouse Stock template AND NAV Bin Contents
@@ -2378,18 +2386,30 @@ function parseWH(input){
           data.forEach(r=>{
             const sku=normSku(r['Item No.']||r['Item No']||'');
             const qty=parseFloat(r['Available Qty. to Take']||r['Quantity']||r['Qty']||0)||0;
-            if(sku&&sku!=='Item No.') totals[sku]=(totals[sku]||0)+qty;
+            const bin=String(r['Bin Code']||r['Bin']||'').trim();
+            if(sku&&sku!=='Item No.'){
+              totals[sku]=(totals[sku]||0)+qty;
+              rawBinRows.push({bin_code:bin,item_no:sku,qty:Math.round(qty)});
+            }
           });
           rows=Object.entries(totals).map(([sku,qty])=>({sku,qty:Math.round(qty)}));
         } else {
           // Standard warehouse template: SKU + Warehouse QTY
-          rows=data.filter(r=>r['SKU']||r['sku']).map(r=>({
-            sku:normSku(r['SKU']||r['sku']||''),
-            qty:parseInt(r['Warehouse QTY']||r['QTY']||r['qty']||0)||0
-          }));
+          data.filter(r=>r['SKU']||r['sku']).forEach(r=>{
+            const sku=normSku(r['SKU']||r['sku']||'');
+            const qty=parseInt(r['Warehouse QTY']||r['QTY']||r['qty']||0)||0;
+            const bin=String(r['Bin Code']||r['Bin']||'').trim();
+            rows.push({sku,qty});
+            rawBinRows.push({bin_code:bin,item_no:sku,qty});
+          });
         }
       }
+      S.whRaw=rawBinRows;
       processWHRows(rows);
+      // Auto-push to cloud (fire-and-forget; failures only log)
+      if(typeof pushWHToSupabase==='function' && S.wh && S.wh.length){
+        pushWHToSupabase().catch(err=>clog('☁ WH cloud push failed: '+err.message));
+      }
     }catch(e){showWHStatus('✗ '+e.message,'s-err');}
     finally{ try{ input.value=''; }catch(_){} }
   };
@@ -2497,8 +2517,13 @@ function clearWHContents(){
     return;
   }
   if(!confirm('Clear WH Bin Contents?\n\nThis wipes the uploaded warehouse quantities, resets every SKU\'s WH qty to 0, and recomputes replenishment. You can re-upload a fresh file afterward.')) return;
+  // Ask whether to also wipe the shared cloud copy
+  const wipeCloud=confirm('Also wipe the SHARED cloud copy?\n\nOK = delete from Supabase too (everyone loses it on next reload).\nCancel = clear locally only (cloud copy stays; next reload will re-pull it).');
+  if(wipeCloud && typeof clearWHCloud==='function'){
+    clearWHCloud().catch(err=>clog('☁ WH cloud clear failed: '+err.message));
+  }
   // Wipe state
-  S.wh=[];
+  S.wh=[]; S.whRaw=[];
   DATA.forEach(d=>{ d.whQty=0; });
   // Recompute recos with empty WH
   if(typeof buildRecos==='function') buildRecos();
@@ -3063,6 +3088,131 @@ function changeUserLabel(){
   // Refresh both cloud status boxes if visible
   if(typeof pullCapacityFromSupabase==='function') pullCapacityFromSupabase(false).catch(()=>{});
   if(typeof pullExceptionsFromSupabase==='function') pullExceptionsFromSupabase(false).catch(()=>{});
+}
+
+// ===== WH Bin Contents cloud sync =====
+function setWHCloudStatus(text,color){
+  const el=document.getElementById('whCloudSync');
+  if(!el) return;
+  const col=color==='green'?'var(--green)':color==='amber'?'var(--amber)':color==='red'?'var(--red)':'var(--muted)';
+  el.style.color=col;
+  el.innerHTML=text;
+}
+async function pullWHFromSupabase(manual=false){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setWHCloudStatus('Cloud: Supabase not configured','amber'); return; }
+  try{
+    setWHCloudStatus('&#9729; Pulling from cloud&hellip;');
+    let all=[]; let from=0; const pageSize=1000;
+    while(true){
+      const page=await sbFetch('/de_wh_bins?select=bin_code,item_no,qty&order=item_no&limit='+pageSize+'&offset='+from);
+      if(!Array.isArray(page)||!page.length) break;
+      all=all.concat(page);
+      if(page.length<pageSize) break;
+      from+=pageSize;
+    }
+    if(!all.length){
+      S.whRaw=[]; S.wh=[];
+      setWHCloudStatus('No bin contents in cloud yet — upload to share','amber');
+      if(manual) clog('☁ WH cloud is empty.');
+      return;
+    }
+    // Store raw bin rows (preserves per-bin detail)
+    S.whRaw=all.map(r=>({bin_code:r.bin_code||'',item_no:normSku(r.item_no),qty:parseFloat(r.qty)||0}));
+    // Aggregate to SKU level for processWHRows
+    const totals={};
+    S.whRaw.forEach(r=>{ if(r.item_no) totals[r.item_no]=(totals[r.item_no]||0)+r.qty; });
+    const rows=Object.entries(totals).map(([sku,qty])=>({sku,qty:Math.round(qty)}));
+    // processWHRows rebuilds S.wh, updates DATA[].whQty, calls buildRecos, refreshes views
+    processWHRows(rows);
+    // Read meta for attribution
+    let meta=null;
+    try{ const m=await sbFetch('/de_wh_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    if(meta){
+      const who=meta.last_uploaded_by||'someone';
+      const when=meta.last_uploaded_at;
+      const rc=meta.row_count||all.length;
+      const sc=meta.sku_count||rows.length;
+      setWHCloudStatus(`Last sync: <strong>${fmtRelTime(when)}</strong> by <strong>${who}</strong> &middot; ${rc.toLocaleString()} rows / ${sc.toLocaleString()} SKUs`,'green');
+    } else {
+      setWHCloudStatus(`Pulled ${all.length.toLocaleString()} rows / ${rows.length.toLocaleString()} SKUs (no meta record)`,'green');
+    }
+    if(manual) clog('☁ WH pulled from cloud: '+all.length+' rows · '+rows.length+' SKUs');
+  }catch(e){
+    if(e.message&&e.message.includes('404')){
+      setWHCloudStatus('⚠ Cloud table not found — run the WH DDL in Supabase','amber');
+    } else {
+      setWHCloudStatus('⚠ Cloud pull failed: '+e.message,'amber');
+    }
+  }
+}
+async function pushWHToSupabase(){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setWHCloudStatus('Supabase not configured — local-only mode','amber'); return; }
+  if(!S.wh||!S.wh.length){ setWHCloudStatus('Nothing to push (WH is empty)','amber'); return; }
+  try{
+    setWHCloudStatus('&#9729; Pushing to cloud&hellip;');
+    // Wipe cloud table first (last-upload-wins semantics)
+    await sbFetch('/de_wh_bins?id=gt.0',{method:'DELETE',prefer:'return=minimal'});
+    // Build rows — prefer S.whRaw (preserves bin granularity); fallback to S.wh (SKU-level)
+    const who=getCurrentUserLabel();
+    const now=new Date().toISOString();
+    let rows;
+    if(S.whRaw && S.whRaw.length){
+      rows=S.whRaw.filter(r=>r.item_no).map(r=>({
+        bin_code:r.bin_code||'',
+        item_no:normSku(r.item_no),
+        qty:Number(r.qty)||0,
+        uploaded_at:now,
+        uploaded_by:who
+      }));
+    } else {
+      rows=S.wh.filter(w=>w.sku).map(w=>({
+        bin_code:'',
+        item_no:normSku(w.sku),
+        qty:Number(w.whQty)||0,
+        uploaded_at:now,
+        uploaded_by:who
+      }));
+    }
+    let pushed=0;
+    for(let i=0;i<rows.length;i+=500){
+      const batch=rows.slice(i,i+500);
+      await sbFetch('/de_wh_bins',{method:'POST',prefer:'return=minimal',body:batch});
+      pushed+=batch.length;
+    }
+    // Update meta
+    try{
+      await sbFetch('/de_wh_meta?on_conflict=id',{
+        method:'POST',
+        prefer:'resolution=merge-duplicates,return=minimal',
+        body:[{id:1,last_uploaded_at:now,last_uploaded_by:who,row_count:rows.length,sku_count:S.wh.length}]
+      });
+    }catch(metaErr){ clog('WH meta update warning: '+metaErr.message); }
+    setWHCloudStatus(`Last sync: <strong>just now</strong> by <strong>${who}</strong> &middot; ${rows.length.toLocaleString()} rows / ${S.wh.length.toLocaleString()} SKUs in cloud`,'green');
+    clog('☁ WH pushed to cloud: '+pushed+' rows · '+S.wh.length+' SKUs');
+  }catch(e){
+    if(e.message&&e.message.includes('404')){
+      setWHCloudStatus('⚠ Cloud table not found — run the WH DDL in Supabase','amber');
+    } else {
+      setWHCloudStatus('⚠ Cloud push failed: '+e.message,'amber');
+    }
+  }
+}
+async function clearWHCloud(){
+  const {url,key}=getSBCreds();
+  if(!url||!key) return;
+  try{
+    await sbFetch('/de_wh_bins?id=gt.0',{method:'DELETE',prefer:'return=minimal'});
+    const now=new Date().toISOString();
+    await sbFetch('/de_wh_meta?on_conflict=id',{
+      method:'POST',
+      prefer:'resolution=merge-duplicates,return=minimal',
+      body:[{id:1,last_uploaded_at:now,last_uploaded_by:getCurrentUserLabel(),row_count:0,sku_count:0}]
+    });
+    setWHCloudStatus('Cloud WH cleared','amber');
+    clog('☁ WH cloud copy cleared');
+  }catch(e){ setWHCloudStatus('Cloud clear failed: '+e.message,'red'); }
 }
 
 async function pullCapacityFromSupabase(manual=false){
@@ -4034,6 +4184,22 @@ function processLiveData(locs,invLevels,orders){
   loadExcFromLocalStorage();
   // Then pull cloud exceptions (shared source of truth) — non-blocking
   pullExceptionsFromSupabase().catch(e=>clog('Exception cloud pull warning: '+e.message));
+  // WH bin contents — itemMap is now built, so matching works
+  // If we already pulled at boot, re-run processWHRows against existing S.whRaw to rebuild matches
+  // Otherwise, fetch from Supabase
+  if(typeof pullWHFromSupabase==='function'){
+    if(S.whRaw && S.whRaw.length){
+      try{
+        const totals={};
+        S.whRaw.forEach(r=>{ if(r.item_no) totals[r.item_no]=(totals[r.item_no]||0)+r.qty; });
+        const rows=Object.entries(totals).map(([sku,qty])=>({sku,qty:Math.round(qty)}));
+        if(rows.length) processWHRows(rows);
+      }catch(e){ clog('WH re-match warning: '+e.message); }
+    } else {
+      S._whCloudPulled=true;
+      pullWHFromSupabase().catch(e=>clog('WH cloud pull warning: '+e.message));
+    }
+  }
   if(!loadStoreSelection()){
     S.sel.clear();STORES.forEach(st=>S.sel.add(st.id));
     S.selOrder=STORES.map(s=>s.id);
@@ -4631,6 +4797,10 @@ loadCredentials();
 });
 // Populate cache freshness label on initial page load if Supabase creds are already saved
 if(typeof refreshCacheLastSync==='function') setTimeout(()=>refreshCacheLastSync().catch(()=>{}),100);
+// Populate WH cloud freshness label on initial page load (auto-pulls + applies if creds present)
+if(typeof pullWHFromSupabase==='function') setTimeout(()=>{
+  if(!S._whCloudPulled){ S._whCloudPulled=true; pullWHFromSupabase().catch(()=>{}); }
+},150);
 </script>
 </body>
 </html>
