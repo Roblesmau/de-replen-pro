@@ -3205,7 +3205,7 @@ function setWHCloudStatus(text,color){
 }
 async function pullWHFromSupabase(manual=false){
   const {url,key}=getSBCreds();
-  if(!url||!key){ setWHCloudStatus('Cloud: Supabase not configured','amber'); return; }
+  if(!url||!key){ setWHCloudStatus('Checking cloud…'); return; }
   try{
     setWHCloudStatus('&#9729; Pulling from cloud&hellip;');
     let all=[]; let from=0; const pageSize=1000;
@@ -3253,7 +3253,7 @@ async function pullWHFromSupabase(manual=false){
 }
 async function pushWHToSupabase(){
   const {url,key}=getSBCreds();
-  if(!url||!key){ setWHCloudStatus('Supabase not configured — local-only mode','amber'); return; }
+  if(!url||!key){ setWHCloudStatus('Checking cloud…'); return; }
   if(!S.wh||!S.wh.length){ setWHCloudStatus('Nothing to push (WH is empty)','amber'); return; }
   try{
     setWHCloudStatus('&#9729; Pushing to cloud&hellip;');
