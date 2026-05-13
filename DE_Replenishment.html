@@ -3011,6 +3011,15 @@ function onCapChange(input){
   applyCapToData();
   saveCapToLocalStorage();
   if(DATA.length) renderInv();
+  // Debounced auto-push to cloud — wait 5s after last edit so a flurry of edits = one round-trip
+  if(typeof pushCapacityToSupabase==='function'){
+    if(S._capPushTimer) clearTimeout(S._capPushTimer);
+    setCloudStatus('&#9201; Pending cloud sync (5s after last edit)…','amber');
+    S._capPushTimer=setTimeout(()=>{
+      S._capPushTimer=null;
+      pushCapacityToSupabase().catch(e=>setCloudStatus('⚠ Auto-push failed: '+e.message,'amber'));
+    },5000);
+  }
 }
 function updateCapTotals(){
   const wrap=document.getElementById('capWrap');if(!wrap) return;
@@ -3265,6 +3274,12 @@ async function pullCapacityFromSupabase(manual=false){
       if(page.length<pageSize) break;
       from+=pageSize;
     }
+    // Cloud is the source of truth — wipe local S.CAP / STORE_BRANDS first so cells
+    // that were removed in the cloud actually disappear locally.
+    STORES.forEach(st=>{
+      S.CAP[st.id]={};
+      if(S.STORE_BRANDS[st.id]) S.STORE_BRANDS[st.id].clear(); else S.STORE_BRANDS[st.id]=new Set();
+    });
     // Apply to S.CAP — cloud is source of truth
     let n=0;
     all.forEach(row=>{
@@ -3322,13 +3337,16 @@ async function pushCapacityToSupabase(){
       setCloudStatus('⚠ Nothing to push (matrix is empty)','amber');
       return;
     }
-    // Upsert in batches of 500 to stay well under PostgREST limits
+    // Wipe cloud table first so zero-ed / removed cells disappear from the shared copy.
+    // Without this, upsert leaves stale non-zero rows behind whenever a cell drops to 0.
+    await sbFetch('/de_capacity?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+    // Insert in batches of 500 to stay well under PostgREST limits
     let pushed=0;
     for(let i=0;i<rows.length;i+=500){
       const batch=rows.slice(i,i+500);
-      await sbFetch('/de_capacity?on_conflict=store_id,brand,type',{
+      await sbFetch('/de_capacity',{
         method:'POST',
-        prefer:'resolution=merge-duplicates,return=minimal',
+        prefer:'return=minimal',
         body:batch
       });
       pushed+=batch.length;
