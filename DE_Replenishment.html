@@ -1565,6 +1565,19 @@ function renderStoreGrid(){
   renderScopeBadges();
   renderPriorityList();
 }
+// Shared helper: any input change (store selection, priority mode, filter) makes the
+// currently displayed plan stale. Hide the post-run cards and re-disable Export NAV /
+// hide Clear results so the user is forced to click Run again to see fresh output.
+function hidePostRunCards(){
+  const rs=document.getElementById('runSummary'); if(rs) rs.style.display='none';
+  const ir=document.getElementById('impactReport'); if(ir) ir.style.display='none';
+  const rc=document.getElementById('recoSection'); if(rc) rc.style.display='none';
+  const np=document.getElementById('navPreviewSection'); if(np) np.style.display='none';
+  const btnClr=document.getElementById('btnClearReco');
+  if(btnClr) btnClr.style.display='none';
+  const btnExp=document.getElementById('btnExportNAVStore');
+  if(btnExp){ btnExp.disabled=true; btnExp.style.opacity='.4'; btnExp.style.cursor='not-allowed'; }
+}
 function toggleStore(id){
   if(S.sel.has(id)){
     S.sel.delete(id);
@@ -1575,14 +1588,10 @@ function toggleStore(id){
   }
   saveStoreSelection();
   renderStoreGrid();filterActive();
-  // Hide all run-output cards until user re-runs — keeps everything in sync with the new selection
-  document.getElementById('runSummary').style.display='none';
-  const _ir=document.getElementById('impactReport'); if(_ir) _ir.style.display='none';
-  const _rs=document.getElementById('recoSection'); if(_rs) _rs.style.display='none';
-  const _np=document.getElementById('navPreviewSection'); if(_np) _np.style.display='none';
+  hidePostRunCards();
 }
-function selectAll(){S.selOrder=STORES.map(s=>s.id);STORES.forEach(st=>S.sel.add(st.id));saveStoreSelection();renderStoreGrid();filterActive();}
-function selectNone(){S.sel.clear();S.selOrder=[];saveStoreSelection();renderStoreGrid();filterActive();}
+function selectAll(){S.selOrder=STORES.map(s=>s.id);STORES.forEach(st=>S.sel.add(st.id));saveStoreSelection();renderStoreGrid();filterActive();hidePostRunCards();}
+function selectNone(){S.sel.clear();S.selOrder=[];saveStoreSelection();renderStoreGrid();filterActive();hidePostRunCards();}
 function runRun(){
   if(!S.sel.size){alert('Select at least one store.');return;}
   // Always rebuild S.recos from fresh inputs (capacity, WH, exceptions, filters)
@@ -3535,6 +3544,9 @@ function syncPriority(val){
   if(el) el.textContent=desc[val]||'';
   saveStoreSelection();
   renderPriorityList();
+  // Priority change invalidates the displayed plan — refresh the grid + hide stale run cards
+  if(typeof renderStoreGrid==='function') renderStoreGrid();
+  if(typeof hidePostRunCards==='function') hidePostRunCards();
 }
 function populateNavLocMap(){
   // Layer saved navLoc values from localStorage on top of baked-in STORES.navLoc
