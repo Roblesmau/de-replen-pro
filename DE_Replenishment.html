@@ -1204,8 +1204,17 @@ function loadVelTiers(){
 function toggleVelTierPanel(){
   const p=document.getElementById('velTierPanel');
   if(!p) return;
-  if(p.style.display==='none'){p.style.display='block';renderVelTiers();}
+  const open=p.style.display==='none';
+  if(open){p.style.display='block';renderVelTiers();}
   else p.style.display='none';
+  try{ localStorage.setItem('de_vel_panel_open',open?'1':'0'); }catch(_){}
+}
+function restoreVelTierPanel(){
+  const p=document.getElementById('velTierPanel');
+  if(!p) return;
+  let open=false;
+  try{ open=localStorage.getItem('de_vel_panel_open')==='1'; }catch(_){}
+  if(open){ p.style.display='block'; renderVelTiers(); }
 }
 function renderVelTiers(){
   const wrap=document.getElementById('velTierRows');if(!wrap) return;
@@ -2726,8 +2735,12 @@ function renderNAVPreview(prefix=''){
 }
 
 // Export NAV
-function exportNAV(){
-  const r=S.activeRecos.length?S.activeRecos:S.recos;
+function exportNAV(recsOverride){
+  // recsOverride: optional array of recos to export instead of the global plan
+  // (used by exportNAVSingle for per-store exports without mutating S.activeRecos)
+  const r=Array.isArray(recsOverride)
+    ? recsOverride
+    : (S.activeRecos.length?S.activeRecos:S.recos);
   if(!r.length){alert('No recommendations. Run replenishment first.');return;}
   const wb=XLSX.utils.book_new();
   const wh=document.getElementById('cfgWH')?.value||'MAIN WAREHOUSE';
@@ -2751,7 +2764,11 @@ function exportNAV(){
   });
   XLSX.writeFile(wb,`NAV_TransferOrders_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
-function exportNAVSingle(sid){const orig=S.activeRecos;S.activeRecos=S.recos.filter(r=>r.storeId===sid);exportNAV();S.activeRecos=orig;}
+function exportNAVSingle(sid){
+  // Export a single store's recos without mutating S.activeRecos
+  const recs=(S.activeRecos.length?S.activeRecos:S.recos).filter(r=>r.storeId===sid);
+  exportNAV(recs);
+}
 function exportCSV(){
   const r=S.activeRecos.length?S.activeRecos:S.recos;
   const rows=[['Store','SKU','Brand','Type','Velocity90','StoreQty','WHQty','Transfer','Signals']];
@@ -3556,19 +3573,8 @@ function applyNewBrand(){
 // Store Selection tab (priority dropdown + Send qty rules panel).
 function syncPriority(val){
   S.priority=val;
-  // Sync both dropdowns
-  const s1=document.getElementById('cfgPriority');
-  const s2=document.getElementById('cfgPriorityStore');
-  if(s1) s1.value=val;
-  if(s2) s2.value=val;
-  // Update description
-  const desc={
-    urgency:'Stores closest to stockout (lowest days of stock remaining) get warehouse units first.',
-    velocity:'Stores with the highest 90-day sales velocity get warehouse units first.',
-    manual:'Stores are filled in the order you selected them on the store grid.'
-  };
-  const el=document.getElementById('priorityDesc');
-  if(el) el.textContent=desc[val]||'';
+  const s=document.getElementById('cfgPriorityStore');
+  if(s) s.value=val;
   saveStoreSelection();
   renderPriorityList();
   // Priority change invalidates the displayed plan — refresh the grid + hide stale run cards
@@ -4851,6 +4857,7 @@ document.addEventListener('keydown',e=>{
 
 // Init
 buildSample();loadVelTiers();loadExcFromLocalStorage();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
+if(typeof restoreVelTierPanel==='function') restoreVelTierPanel();
 showTab('connect');
 
 function saveCredentials(){
