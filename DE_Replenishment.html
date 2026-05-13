@@ -765,7 +765,7 @@
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3 &mdash; WH Bin Contents</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
           <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch latest WH bin contents from Supabase (shared cloud copy)">&#9889; Load from cloud</button>
-          <span id="whCloudSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking cloud&hellip;</span>
+          <span id="whCloudSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud&hellip;</span>
           <label id="btnWH" class="btn btn-secondary btn-sm" style="cursor:pointer;opacity:.4;pointer-events:none">
             &#127981; Upload Bin Contents
             <input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">
@@ -3205,7 +3205,7 @@ function setWHCloudStatus(text,color){
 }
 async function pullWHFromSupabase(manual=false){
   const {url,key}=getSBCreds();
-  if(!url||!key){ setWHCloudStatus('Checking cloud…'); return; }
+  if(!url||!key){ setWHCloudStatus('Checking the cloud…'); return; }
   try{
     setWHCloudStatus('&#9729; Pulling from cloud&hellip;');
     let all=[]; let from=0; const pageSize=1000;
@@ -3253,7 +3253,7 @@ async function pullWHFromSupabase(manual=false){
 }
 async function pushWHToSupabase(){
   const {url,key}=getSBCreds();
-  if(!url||!key){ setWHCloudStatus('Checking cloud…'); return; }
+  if(!url||!key){ setWHCloudStatus('Checking the cloud…'); return; }
   if(!S.wh||!S.wh.length){ setWHCloudStatus('Nothing to push (WH is empty)','amber'); return; }
   try{
     setWHCloudStatus('&#9729; Pushing to cloud&hellip;');
