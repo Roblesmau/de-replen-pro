@@ -446,8 +446,10 @@
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
         <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Send quantity by velocity (per store · per SKU)</span>
         <span style="font-size:11px;color:var(--hint)">— weekly velocity = 90d sales ÷ 12.857</span>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="allowOverCapToggle" onchange="onOverCapToggle()"> Allow over-capacity sends
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px" title="Allow per (store · brand · type) aggregate stock to exceed capacity by up to this percent. 0 = strict; 10 = allow up to 110% of capacity.">
+          <span>Over-capacity tolerance</span>
+          <input type="number" id="overCapPctInput" min="0" max="500" step="1" value="0" onchange="onOverCapPctChange(this)" style="width:60px;padding:3px 6px;font-size:12px;text-align:right;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text)">
+          <span>%</span>
         </label>
       </div>
       <div id="velTierRows" style="display:flex;flex-direction:column;gap:6px"></div>
@@ -928,7 +930,7 @@ const COST={'Ray-Ban':52,'Oakley':70,'Gucci':210,'Prada':215,'Tom Ford':180,'Mau
 const DCAP={'Ray-Ban':{Sunglasses:60,Optical:40,Kids:20},'Oakley':{Sunglasses:50,Optical:30,Kids:15},'Gucci':{Sunglasses:25,Optical:20,Kids:0},'Prada':{Sunglasses:25,Optical:20,Kids:0},'Tom Ford':{Sunglasses:25,Optical:20,Kids:0},'Maui Jim':{Sunglasses:40,Optical:25,Kids:10},'Versace':{Sunglasses:20,Optical:15,Kids:0},'Tiffany':{Sunglasses:15,Optical:12,Kids:0}};
 
 const VEL_TIERS_DEFAULT=[{minPerWeek:0,qty:1},{minPerWeek:1,qty:2},{minPerWeek:3,qty:3},{minPerWeek:7,qty:5}];
-const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),allowOverCap:false,exceptions:new Set(),
+const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),
   raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
 };
 let DATA=[],charts={};
@@ -964,10 +966,24 @@ function initCap(){
 }
 
 function buildRecos(){
+  // ── Pre-compute aggregate on-hand per (store, brand, type) from REAL DATA rows ──
+  // Synthetic rows have storeQty=0 by construction so we only sum real rows.
+  // This becomes the baseline for room calculations everywhere below.
+  const aggOnHand={}; // key "sid|brand|type" -> sum of real storeQty
+  DATA.forEach(d=>{
+    if(d._synthetic) return;
+    const k=d.storeId+'|'+d.brand+'|'+d.type;
+    aggOnHand[k]=(aggOnHand[k]||0)+(d.storeQty||0);
+  });
+  // Track how much we've already promised to ship per (store, brand, type) this run
+  // so multiple SKUs in the same bucket share the same headroom budget.
+  const aggUsed={};
+
   // GAP-FILL: for every WH SKU that has no DATA row at a store,
   // inject a synthetic row with storeQty=0 so buildRecos can see it.
-  // Rule: only inject if store capacity for that brand+type > 0 (store carries that brand).
-  // This ensures WH items at zero store stock still generate replenishment recommendations.
+  // Rule: inject only if (a) store has capacity > 0 for this brand+type AND
+  //        (b) aggregate room (effectiveCap - currentOnHand - alreadyPromised) > 0.
+  // The aggregate check prevents over-capacity stores from receiving brand-new SKUs.
   if(S.wh.length>0 && S.raw.itemMap && Object.keys(S.raw.itemMap).length){
     // Build set of existing store+sku combos in DATA
     const dataKeys=new Set(DATA.map(d=>d.storeId+'|'+d.sku.toLowerCase()));
@@ -977,6 +993,10 @@ function buildRecos(){
       if(v.variantSku) skuToMeta[normSku(v.variantSku).toLowerCase()]={brand:v.brand,type:v.type,desc:v.desc,cost:v.cost};
     });
     const injected=[];
+    // Track injections per (store, brand, type) so we don't inject more SKUs than
+    // the store can actually accept this run. One unit per injected SKU is the
+    // default tier qty for zero-velocity items.
+    const injectionsByCombo={};
     S.wh.forEach(w=>{
       if(!w.whQty||w.whQty<=0) return;
       const skuKey=normSku(w.sku).toLowerCase();
@@ -985,21 +1005,32 @@ function buildRecos(){
       STORES.forEach(st=>{
         const comboKey=st.id+'|'+skuKey;
         if(dataKeys.has(comboKey)) return; // already in DATA
-        // Only inject if this store has capacity for this brand+type
-        const cap=(S.CAP[st.id]&&S.CAP[st.id][meta.brand]&&S.CAP[st.id][meta.brand][meta.type])||0;
-        if(cap<=0) return;
+        // Must have base capacity > 0 (store carries this brand+type at all)
+        const baseCap=(S.CAP[st.id]&&S.CAP[st.id][meta.brand]&&S.CAP[st.id][meta.brand][meta.type])||0;
+        if(baseCap<=0) return;
+        // Aggregate room check: effectiveCap (with over-cap tolerance applied)
+        // minus real on-hand minus injections already queued for this combo.
+        const effCap=getEffectiveCap(st.id,meta.brand,meta.type);
+        const cBucket=st.id+'|'+meta.brand+'|'+meta.type;
+        const onHand=aggOnHand[cBucket]||0;
+        const alreadyInjected=injectionsByCombo[cBucket]||0;
+        if((effCap-onHand-alreadyInjected)<=0) return; // no aggregate room
+        injectionsByCombo[cBucket]=alreadyInjected+1;
         injected.push({
           storeId:st.id, store:st.short, city:st.city||'',
           sku:normSku(w.sku), brand:meta.brand, type:meta.type,
           desc:meta.desc, cost:meta.cost,
           storeQty:0, velocity90:0, whQty:w.whQty,
-          priorYear90:0, cap, _synthetic:true
+          priorYear90:0, cap:baseCap, _synthetic:true
         });
       });
     });
     if(injected.length){
       // Remove stale synthetic rows then add fresh ones
       DATA=DATA.filter(d=>!d._synthetic).concat(injected);
+    } else {
+      // Still wipe stale synthetic rows from prior runs even if nothing new gets injected
+      DATA=DATA.filter(d=>!d._synthetic);
     }
   }
 
@@ -1037,9 +1068,17 @@ function buildRecos(){
     // (e.g. slow seller with tierQty=1 and storeQty=1 → send 0).
     // Hot sellers (tierQty=5 say) at storeQty=1 → send 4 to top up to target.
     const tierGap=Math.max(0,tierQty-(d.storeQty||0));
-    // Still respect shelf capacity (unless explicitly allowed to over-fill)
-    const room=Math.max(0,(d.cap||0)-d.storeQty);
-    const desiredQty=S.allowOverCap?tierGap:Math.min(tierGap,room);
+    // AGGREGATE room check: effectiveCap (with over-cap tolerance) for the entire
+    // (store, brand, type) bucket, minus everything we've already committed this run.
+    // Per-SKU check was wrong — a brand+type could be 122% full overall while
+    // each individual SKU "appeared" to have headroom. Now multiple SKUs in the
+    // same bucket share one budget.
+    const bucket=d.storeId+'|'+d.brand+'|'+d.type;
+    const effCap=getEffectiveCap(d.storeId,d.brand,d.type);
+    const baseOnHand=aggOnHand[bucket]||0;
+    const usedSoFar=aggUsed[bucket]||0;
+    const aggRoom=Math.max(0,effCap-baseOnHand-usedSoFar);
+    const desiredQty=Math.min(tierGap,aggRoom);
     const seasonal=d.priorYear90>d.velocity90*1.3;
     const signals=[];
     if(isHot) signals.push('hot');
@@ -1047,7 +1086,9 @@ function buildRecos(){
     if(d._synthetic) signals.push('low'); // zero store stock — always needs replenishment
     if(seasonal) signals.push('seasonal');
     if(desiredQty>0&&wh.whQty>0){
-      S.recos.push({...d,daysLeft:daysLeft===999?'—':daysLeft,whQty:wh.whQty,transferQty:Math.min(desiredQty,wh.whQty),signals,isHot,seasonal});
+      const transferQty=Math.min(desiredQty,wh.whQty);
+      aggUsed[bucket]=(aggUsed[bucket]||0)+transferQty;
+      S.recos.push({...d,daysLeft:daysLeft===999?'—':daysLeft,whQty:wh.whQty,transferQty,signals,isHot,seasonal});
     }
   });
   S.recos.sort((a,b)=>b.signals.length-a.signals.length||b.velocity90-a.velocity90);
@@ -1190,19 +1231,29 @@ function loadStoreSelection(){
     return S.sel.size>0;
   }catch(e){return false;}
 }
-// ── Persist velocity tiers + over-cap toggle ──────────────────────────────
+// ── Persist velocity tiers + over-cap tolerance % ─────────────────────────
 function saveVelTiers(){
   try{
     localStorage.setItem('de_vel_tiers',JSON.stringify(S.velTiers));
-    localStorage.setItem('de_allow_overcap',S.allowOverCap?'1':'0');
+    localStorage.setItem('de_overcap_pct',String(S.overCapPct||0));
   }catch(e){}
 }
 function loadVelTiers(){
   try{
     const raw=localStorage.getItem('de_vel_tiers');
     if(raw){const parsed=JSON.parse(raw);if(Array.isArray(parsed)&&parsed.length) S.velTiers=parsed;}
-    S.allowOverCap=localStorage.getItem('de_allow_overcap')==='1';
-  }catch(e){}
+    // Read new % setting first; fall back to migrating the old boolean toggle if present
+    const pctRaw=localStorage.getItem('de_overcap_pct');
+    if(pctRaw!==null){
+      const n=parseFloat(pctRaw); S.overCapPct=isFinite(n)&&n>=0?n:0;
+    } else if(localStorage.getItem('de_allow_overcap')==='1'){
+      // Legacy migration: unlimited toggle ≈ a very high tolerance %
+      S.overCapPct=9999;
+      try{ localStorage.setItem('de_overcap_pct','9999'); localStorage.removeItem('de_allow_overcap'); }catch(_){}
+    } else {
+      S.overCapPct=0;
+    }
+  }catch(e){ S.overCapPct=0; }
 }
 // ── Velocity tier editor UI ───────────────────────────────────────────────
 function toggleVelTierPanel(){
@@ -1222,7 +1273,8 @@ function restoreVelTierPanel(){
 }
 function renderVelTiers(){
   const wrap=document.getElementById('velTierRows');if(!wrap) return;
-  document.getElementById('allowOverCapToggle').checked=!!S.allowOverCap;
+  const pctInput=document.getElementById('overCapPctInput');
+  if(pctInput) pctInput.value=String(S.overCapPct||0);
   const tiers=S.velTiers.slice().sort((a,b)=>a.minPerWeek-b.minPerWeek);
   wrap.innerHTML=tiers.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;font-size:13px">
     <span style="min-width:100px;font-size:11px;color:var(--muted)">If ≥</span>
@@ -1244,8 +1296,19 @@ function removeVelTier(i){
   const tiers=S.velTiers.slice().sort((a,b)=>a.minPerWeek-b.minPerWeek);
   tiers.splice(i,1);S.velTiers=tiers.length?tiers:[{minPerWeek:0,qty:1}];saveVelTiers();renderVelTiers();
 }
-function resetVelTiers(){if(!confirm('Reset velocity tiers to defaults?')) return;S.velTiers=VEL_TIERS_DEFAULT.map(t=>({...t}));S.allowOverCap=false;saveVelTiers();renderVelTiers();}
-function onOverCapToggle(){S.allowOverCap=document.getElementById('allowOverCapToggle').checked;saveVelTiers();}
+function resetVelTiers(){if(!confirm('Reset velocity tiers to defaults?')) return;S.velTiers=VEL_TIERS_DEFAULT.map(t=>({...t}));S.overCapPct=0;saveVelTiers();renderVelTiers();}
+function onOverCapPctChange(input){
+  const n=parseFloat(input.value);
+  S.overCapPct=isFinite(n)&&n>=0?n:0;
+  input.value=String(S.overCapPct);
+  saveVelTiers();
+}
+// Effective capacity = base capacity scaled by S.overCapPct tolerance
+function getEffectiveCap(sid,b,t){
+  const base=(S.CAP&&S.CAP[sid]&&S.CAP[sid][b]&&S.CAP[sid][b][t])||0;
+  const pct=(typeof S.overCapPct==='number'&&S.overCapPct>=0)?S.overCapPct:0;
+  return Math.floor(base*(1+pct/100));
+}
 // ── Capacity matrix template ──────────────────────────────────────────────
 function downloadCapTemplate(){
   const examples=[
