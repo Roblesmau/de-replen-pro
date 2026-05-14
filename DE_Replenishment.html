@@ -2267,13 +2267,26 @@ function populateInvFilters(){
   if(!sf||!bf) return;
   const savedS=JSON.parse(localStorage.getItem('de_inv_store_filter')||'null');
   sf.innerHTML='<option value="__all__">✓ Select All</option>'+STORES.map(s=>`<option value="${s.id}"${!savedS||savedS.includes(s.id)?' selected':''}>${s.id} — ${s.short}</option>`).join('');
-  // Exclude Unknown from brand filter — these are products with no vendor set in Shopify
-  const brands=[...new Set(DATA.map(d=>d.brand))].filter(b=>b&&b!=='Unknown').sort();
+  // Union sources so every catalog brand/type is selectable — not just ones currently stocked.
+  // Without this, a type/brand that exists in Shopify but has zero on-hand at every store
+  // never appears in the dropdown, and you can't filter the WH-only items to it.
+  //   1. Global BRANDS/TYPES — populated from full Shopify product catalog in processLiveData
+  //   2. DATA-derived — covers sample mode and synthetic gap-fill rows
+  //   3. WH bin contents — picks up types/brands present in warehouse but not at any store
+  const brandSet=new Set();
+  (Array.isArray(BRANDS)?BRANDS:[]).forEach(b=>brandSet.add(b));
+  DATA.forEach(d=>brandSet.add(d.brand));
+  (S.wh||[]).forEach(w=>brandSet.add(w.brand));
+  const brands=[...brandSet].filter(b=>b&&b!=='Unknown').sort();
   const savedB=JSON.parse(localStorage.getItem('de_inv_brand_filter')||'null');
   bf.innerHTML='<option value="__all__">✓ Select All</option>'+brands.map(b=>`<option value="${hesc(b)}"${!savedB||savedB.includes(b)?' selected':''}>${hesc(b)}</option>`).join('');
   const tf=document.getElementById('invTypeFilter');
   if(tf){
-    const types=[...new Set(DATA.map(d=>d.type))].filter(t=>t&&t!=='Unknown').sort();
+    const typeSet=new Set();
+    (Array.isArray(TYPES)?TYPES:[]).forEach(t=>typeSet.add(t));
+    DATA.forEach(d=>typeSet.add(d.type));
+    (S.wh||[]).forEach(w=>typeSet.add(w.type));
+    const types=[...typeSet].filter(t=>t&&t!=='Unknown').sort();
     const saved=JSON.parse(localStorage.getItem('de_inv_type_filter')||'null');
     tf.innerHTML='<option value="__all__">✓ Select All</option>'+types.map(t=>`<option value="${hesc(t)}"${!saved||saved.includes(t)?' selected':''}>${hesc(t)}</option>`).join('');
   }
