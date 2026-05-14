@@ -4369,6 +4369,12 @@ function processLiveData(locs,invLevels,orders){
   clog('  Brands ('+BRANDS.length+' from full catalog): '+BRANDS.slice(0,8).join(', ')+(BRANDS.length>8?'...':''));
   clog('  Types ('+TYPES.length+'): '+TYPES.join(', '));
   clog('  Note: brands include out-of-stock items — capacity grid shows all '+BRANDS.length+' brands');
+  // Slot count = number of DATA rows per (store, brand, type) — used as a sensible
+  // capacity default (auto-cap = "as many slots as you currently stock") when the
+  // capacity matrix hasn't been imported yet. The actual d.cap on rows is set by
+  // applyCapToData() further down, not from this slot count.
+  const slotCount={};
+  DATA.forEach(d=>{const k=d.storeId+'|'+d.brand+'|'+d.type;slotCount[k]=(slotCount[k]||0)+1;});
   S.CAP={};S.ORIG={};S.STORE_BRANDS={};
   STORES.forEach(st=>{
     S.CAP[st.id]={};S.ORIG[st.id]={};S.STORE_BRANDS[st.id]=new Set(BRANDS);
