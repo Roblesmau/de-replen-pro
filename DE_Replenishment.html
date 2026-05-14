@@ -1040,21 +1040,18 @@ function buildRecos(){
       });
     });
     if(injected.length){
-      // Remove stale synthetic rows then add fresh ones
-      DATA=DATA.filter(d=>!d._synthetic).concat(injected);
+      // Synthetic (gap-fill / new-to-store) rows go FIRST so they claim aggregate room
+      // before under-target real rows. Matches the "new-to-store wins" priority rule —
+      // a store that currently has 0 SKUs gets variety on the shelf before existing
+      // SKUs get top-ups.
+      DATA=injected.concat(DATA.filter(d=>!d._synthetic));
     } else {
       // Still wipe stale synthetic rows from prior runs even if nothing new gets injected
       DATA=DATA.filter(d=>!d._synthetic);
     }
   }
 
-  // Pre-build O(1) WH lookup map — avoids O(n²) .find() on every row
-  const whMap={};
-  S.wh.forEach(w=>{
-    const k=w.brand+'|'+w.type;
-    whMap[k]=(whMap[k]||0)+w.whQty;
-  });
-  // Also build per-SKU map for more precise matching
+  // Per-SKU WH availability map — O(1) lookup, no brand+type fallback
   const whSkuMap={};
   S.wh.forEach(w=>{if(w.sku) whSkuMap[String(w.sku).toLowerCase()]=w.whQty;});
 
@@ -1068,9 +1065,11 @@ function buildRecos(){
     // Skip if brand/type not in Inventory tab filter selection
     if(invBrands.length&&!invBrands.includes(d.brand)) return;
     if(invTypes.length&&!invTypes.includes(d.type)) return;
-    // Try SKU match first, then brand+type fallback
+    // WH availability for this exact SKU. No brand+type fallback — that was inflating
+    // aggUsed with phantom recos that filterActive would later drop (per-SKU pool is 0),
+    // wasting aggregate-room budget that real gap-fill candidates needed.
     const skuKey=String(d.sku||'').toLowerCase();
-    const whQty=whSkuMap[skuKey]!==undefined ? whSkuMap[skuKey] : (whMap[d.brand+'|'+d.type]||d.whQty||0);
+    const whQty=whSkuMap[skuKey]!==undefined ? whSkuMap[skuKey] : (d.whQty||0);
     const wh={whQty};
     const daily=d.velocity90/90;
     const daysLeft=daily>0?Math.round(d.storeQty/daily):999;
