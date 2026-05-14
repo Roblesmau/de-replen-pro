@@ -624,11 +624,16 @@
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Model</label>
-      <select id="invForecastModel" onchange="renderInv()" title="Forecast model" style="height:36px;padding:6px 8px;font-size:12px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--card);color:var(--text)"><option value="trend">Trend</option><option value="wma">WMA</option><option value="seasonal">Seasonal</option><option value="exp">EXP</option></select>
+      <select id="invForecastModel" onchange="renderInv()" title="How the 30d / 90d forecast columns are calculated. Hover an option to see what it does." style="height:36px;padding:6px 8px;font-size:12px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--card);color:var(--text)">
+        <option value="trend" title="Trend — current 90d velocity adjusted by the YoY trend %. Best when prior-year data is unreliable.">Trend (YoY-adjusted)</option>
+        <option value="wma" title="Weighted Moving Average — 70% current 90d + 30% prior-year normalized to 90d. Smooths out short-term spikes.">Weighted Moving Avg</option>
+        <option value="seasonal" title="Seasonal Index — harmonic mean of current and prior-year demand. Best when seasonality drives sales.">Seasonal Index</option>
+        <option value="exp" title="Exponential Smoothing — 60% current 90d + 40% prior-year normalized. Heavier weight on recent data than WMA.">Exponential Smoothing</option>
+      </select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Actions</label>
-      <button class="btn btn-secondary btn-sm" onclick="resetInvFilters()" style="white-space:nowrap">☑ Select All</button>
+      <button class="btn btn-secondary btn-sm" onclick="resetInvFilters()" style="white-space:nowrap" title="Re-select all stores, brands, and types (clears any narrowing)">↺ Reset filters</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
       <span style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">&nbsp;</span>
@@ -637,7 +642,16 @@
   </div>
   <div class="card">
     <div class="card-title">Store totals — on hand by store</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Total units on hand per store across all brands and types. Use this to cross-check against your POS reports.</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:11px;color:var(--muted)">Total units on hand per store across all brands and types. Use this to cross-check against your POS reports.</span>
+      <span style="display:inline-flex;gap:6px;align-items:center;font-size:10px;color:var(--muted)" title="Fill % = on-hand units ÷ total capacity for the selected brands and types">
+        <span style="font-weight:600;letter-spacing:.04em;text-transform:uppercase">Fill %:</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:10px;height:10px;border-radius:2px;background:var(--red)"></span>&lt;30</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:10px;height:10px;border-radius:2px;background:var(--amber)"></span>30–60</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:10px;height:10px;border-radius:2px;background:var(--green)"></span>60–90</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:10px;height:10px;border-radius:2px;background:var(--blue)"></span>&gt;90</span>
+      </span>
+    </div>
     <div style="overflow-x:auto">
       <table id="invTotalsTable">
         <thead id="invTotalsHead"></thead>
@@ -2315,7 +2329,8 @@ function renderInv(){
   const sel=invStoreFilter.length?invStoreFilter:STORES.map(s=>s.id);
   const hasPY=(S.raw.ordersPY||[]).length>0;
   const fcModel=(document.getElementById('invForecastModel')?.value)||'trend';
-  const fcLabel={trend:'Trend',wma:'WMA',seasonal:'Seasonal',exp:'EXP'}[fcModel]||'Trend';
+  // Column-header label: short for table width, full name lives in the dropdown title attrs
+  const fcLabel={trend:'Trend',wma:'Wtd Avg',seasonal:'Seasonal',exp:'Exp Smooth'}[fcModel]||'Trend';
 
   // Helper: cap for a brand+type+store counted ONCE (not per SKU row)
   function storeCapOnce(stData,storeId){
@@ -2363,13 +2378,13 @@ function renderInv(){
       grandSkus+=avail;grandUnits+=units;grandAvail+=avail;grandCap+=cap;grandVel+=vel;grandPY+=py;
       return`<tr>
         <td><strong>${st.short}</strong><br><span style="font-size:10px;color:var(--muted)">${st.city||''}</span></td>
-        <td style="text-align:right;font-family:monospace">${avail.toLocaleString()}</td>
+        <td class="mono" style="text-align:right">${avail.toLocaleString()}</td>
         <td style="text-align:right;font-size:14px;font-weight:600">${units.toLocaleString()}</td>
         <td style="text-align:right;color:var(--muted)">${cap.toLocaleString()}</td>
         <td style="text-align:right"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:4px;border-radius:2px;background:var(--border);margin-top:3px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td>
         <td style="text-align:right;color:var(--blue)">${vel.toLocaleString()}</td>
         <td style="text-align:right;color:var(--muted)">${hasPY?py.toLocaleString():'—'}</td>
-        <td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td>
+        <td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':`<span aria-hidden="true" style="user-select:none;margin-right:2px">${tr>0?'▲':tr<0?'▼':''}</span>${tr>0?'+':''}${tr}%`}</td>
         <td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td>
         <td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>
         <td style="text-align:right;color:${dos<=30?'var(--red)':dos<=60?'var(--amber)':'var(--muted)'}">${dos===999?'—':dos+'d'}</td>
@@ -2382,13 +2397,13 @@ function renderInv(){
     const grandDos=grandVel>0?Math.round(grandUnits/(grandVel/90)):999;
     totalsFoot.innerHTML=`<tr style="background:var(--bg)">
       <td><strong>TOTAL</strong></td>
-      <td style="text-align:right;font-family:monospace">${grandSkus.toLocaleString()}</td>
+      <td class="mono" style="text-align:right">${grandSkus.toLocaleString()}</td>
       <td style="text-align:right;font-size:14px;font-weight:700">${grandUnits.toLocaleString()}</td>
       <td style="text-align:right">${grandCap.toLocaleString()}</td>
       <td style="text-align:right;font-weight:700">${grandPct}%</td>
       <td style="text-align:right">${grandVel.toLocaleString()}</td>
       <td style="text-align:right">${hasPY?grandPY.toLocaleString():'—'}</td>
-      <td style="text-align:right;font-weight:600;color:${grandTr===null?'var(--muted)':grandTr>0?'var(--green)':grandTr<0?'var(--red)':'var(--muted)'}">${grandTr===null?'—':(grandTr>0?'▲ +':grandTr<0?'▼ ':'')+grandTr+'%'}</td>
+      <td style="text-align:right;font-weight:600;color:${grandTr===null?'var(--muted)':grandTr>0?'var(--green)':grandTr<0?'var(--red)':'var(--muted)'}">${grandTr===null?'—':`<span aria-hidden="true" style="user-select:none;margin-right:2px">${grandTr>0?'▲':grandTr<0?'▼':''}</span>${grandTr>0?'+':''}${grandTr}%`}</td>
       <td style="text-align:right">${fmt30(grandFc)}</td>
       <td style="text-align:right">${fmt90(grandFc)}</td>
       <td style="text-align:right">${grandDos===999?'—':grandDos+'d'}</td>
@@ -2409,9 +2424,9 @@ function renderInv(){
     const ck=d.storeId+'|'+d.brand+'|'+d.type;
     if(!capSeen.has(ck)){agg[k].cap+=(S.CAP[d.storeId]?.[d.brand]?.[d.type]||0);capSeen.add(ck);}
     agg[k].byStore[d.storeId]=(agg[k].byStore[d.storeId]||0)+d.storeQty;
-    // WH qty counted once per SKU (same SKU exists across multiple store rows)
-    const wk=k+'|||'+d.sku;
-    if(!aggWHSeen.has(wk)){agg[k].whQty+=(d.whQty||0);aggWHSeen.add(wk);}
+    // WH qty counted once per SKU globally (same SKU never double-counted, even if it
+    // somehow appears under different brand/type buckets due to catalog inconsistencies)
+    if(d.sku && !aggWHSeen.has(d.sku)){agg[k].whQty+=(d.whQty||0);aggWHSeen.add(d.sku);}
   });
   const aggRows=Object.values(agg).sort((a,b)=>a.brand.localeCompare(b.brand)||a.type.localeCompare(b.type));
   const countEl=document.getElementById('invCount');
@@ -2439,8 +2454,8 @@ function renderInv(){
       ?`<td style="font-weight:600;font-size:12px">${hesc(r.brand)}</td>`
       :`<td style="color:var(--hint);font-size:11px;padding-left:14px">└─</td>`;
     lastBrand=r.brand;
-    const storeCells=selStoresCols.map(st=>{const v=r.byStore[st.id]||0;return`<td style="text-align:center;font-family:monospace;font-size:11px;color:${v>0?'var(--green)':v<0?'var(--red)':'var(--hint)'}">${v||'—'}</td>`;}).join('');
-    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':(tr>0?'▲ +':tr<0?'▼ ':'')+tr+'%'}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>`;
+    const storeCells=selStoresCols.map(st=>{const v=r.byStore[st.id]||0;return`<td class="mono" style="text-align:center;font-size:11px;color:${v>0?'var(--green)':v<0?'var(--red)':'var(--hint)'}">${v||'—'}</td>`;}).join('');
+    const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':`<span aria-hidden="true" style="user-select:none;margin-right:2px">${tr>0?'▲':tr<0?'▼':''}</span>${tr>0?'+':''}${tr}%`}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>`;
     return`<tr>${brandCell}<td style="font-size:11px;color:var(--muted)">${hesc(r.type)}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td>${pyCells}${storeCells}</tr>`;
   }).join('');
 }
@@ -4330,10 +4345,10 @@ function processLiveData(locs,invLevels,orders){
       storeQty,
       // From LINE_ITEMS
       velocity90:v90,
-      // Defaults
+      // Defaults — d.cap is overwritten by applyCapToData() from S.CAP shortly after
       whQty:0,
       priorYear90:0,
-      cap:1
+      cap:0
     });
     matched++;
   });
@@ -4342,9 +4357,8 @@ function processLiveData(locs,invLevels,orders){
   DATA.forEach(d=>{dataPerStore[d.store]=(dataPerStore[d.store]||0)+1;});
   clog('  DATA rows per store: '+Object.entries(dataPerStore).map(([s,n])=>s+':'+n).join(' | '));
   clog('  DATA: '+matched+' matched | '+skippedLoc+' skipped (unknown location) | '+skippedProd+' skipped (no SKU in catalog)');
-  const slotCount={};
-  DATA.forEach(d=>{const k=d.storeId+'|'+d.brand+'|'+d.type;slotCount[k]=(slotCount[k]||0)+1;});
-  DATA.forEach(d=>{d.cap=slotCount[d.storeId+'|'+d.brand+'|'+d.type]||1;});
+  // d.cap is authoritatively set by applyCapToData() from S.CAP (real capacity matrix).
+  // Pushed rows start with cap:0; applyCapToData() runs below in the boot path.
   // Use full product catalog (S.raw.products) for brand/type lists
   // Includes ALL brands — even those currently out of stock in every store
   const productSource = S.raw.products&&S.raw.products.length ? S.raw.products : Object.values(S.raw.itemMap||{});
