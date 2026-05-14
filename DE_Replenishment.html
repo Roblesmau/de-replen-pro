@@ -176,6 +176,35 @@
   }
   .filter-multi::-webkit-scrollbar-thumb:hover { background:var(--muted); }
 
+  /* Inventory filter row — fluid grid that reflows on narrower viewports */
+  .inv-filter-row {
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+    gap:14px;
+    margin-bottom:14px;
+    align-items:flex-start;
+  }
+  .inv-filter-col { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .inv-filter-col select.filter-multi { width:100%; min-width:0; }
+  .inv-filter-col label.filter-label,
+  .inv-filter-col > label { font-size:11px; font-weight:500; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
+  @media (max-width:600px){
+    .inv-filter-row { grid-template-columns:1fr; gap:10px; }
+    .filter-multi { height:160px; }
+  }
+
+  /* Sticky first 2 columns on the SKU detail table — keeps Brand/Type
+     anchored while horizontally scrolling through store columns. */
+  #storeInvTable th:nth-child(1), #storeInvTable td:nth-child(1) {
+    position:sticky; left:0; background:var(--surface); z-index:2;
+  }
+  #storeInvTable th:nth-child(2), #storeInvTable td:nth-child(2) {
+    position:sticky; left:120px; background:var(--surface); z-index:2;
+  }
+  #storeInvTable thead th:nth-child(1), #storeInvTable thead th:nth-child(2) {
+    z-index:3; background:var(--surface-2);
+  }
+
   /* Grid */
   .row { display:grid; gap:14px; }
   .row2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -609,18 +638,18 @@
 
 <!-- INVENTORY -->
 <div class="panel" id="panel-inventory">
-  <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-start">
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <label class="filter-label">Stores <span class="count-pill" id="invStoreCount"></span></label>
-      <select id="invStoreFilter" class="filter-multi" multiple onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)" style="min-width:180px"></select>
+  <div class="inv-filter-row">
+    <div class="inv-filter-col">
+      <label class="filter-label" id="invStoreLabel">Stores <span class="count-pill" id="invStoreCount"></span></label>
+      <select id="invStoreFilter" class="filter-multi" multiple aria-labelledby="invStoreLabel" onchange="handleInvFilter('invStoreFilter',saveInvStoreFilter)"></select>
     </div>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <label class="filter-label">Brands <span class="count-pill" id="invBrandCount"></span></label>
-      <select id="invBrandFilter" class="filter-multi" multiple onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)" style="min-width:160px"></select>
+    <div class="inv-filter-col">
+      <label class="filter-label" id="invBrandLabel">Brands <span class="count-pill" id="invBrandCount"></span></label>
+      <select id="invBrandFilter" class="filter-multi" multiple aria-labelledby="invBrandLabel" onchange="handleInvFilter('invBrandFilter',saveInvBrandFilter)"></select>
     </div>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <label class="filter-label">Types <span class="count-pill" id="invTypeCount"></span></label>
-      <select id="invTypeFilter" class="filter-multi" multiple onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)" style="min-width:150px"></select>
+    <div class="inv-filter-col">
+      <label class="filter-label" id="invTypeLabel">Types <span class="count-pill" id="invTypeCount"></span></label>
+      <select id="invTypeFilter" class="filter-multi" multiple aria-labelledby="invTypeLabel" onchange="handleInvFilter('invTypeFilter',saveInvTypeFilter)"></select>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;justify-content:flex-end">
       <label style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Model</label>
@@ -944,10 +973,15 @@ const COST={'Ray-Ban':52,'Oakley':70,'Gucci':210,'Prada':215,'Tom Ford':180,'Mau
 const DCAP={'Ray-Ban':{Sunglasses:60,Optical:40,Kids:20},'Oakley':{Sunglasses:50,Optical:30,Kids:15},'Gucci':{Sunglasses:25,Optical:20,Kids:0},'Prada':{Sunglasses:25,Optical:20,Kids:0},'Tom Ford':{Sunglasses:25,Optical:20,Kids:0},'Maui Jim':{Sunglasses:40,Optical:25,Kids:10},'Versace':{Sunglasses:20,Optical:15,Kids:0},'Tiffany':{Sunglasses:15,Optical:12,Kids:0}};
 
 const VEL_TIERS_DEFAULT=[{minPerWeek:0,qty:1},{minPerWeek:1,qty:2},{minPerWeek:3,qty:3},{minPerWeek:7,qty:5}];
-const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),
+const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),_dataVersion:0,_capVersion:0,_whVersion:0,
   raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
 };
 let DATA=[],charts={};
+// Cache-invalidation tokens — bump whenever the underlying data changes so memoized
+// renderers (e.g., renderInv) know to invalidate their cached output.
+function bumpDataVersion(){S._dataVersion=(S._dataVersion||0)+1;}
+function bumpCapVersion(){S._capVersion=(S._capVersion||0)+1;}
+function bumpWhVersion(){S._whVersion=(S._whVersion||0)+1;}
 function seed(x){return((x*9301+49297)%233280)/233280;}
 function rnd(a,b,x){return Math.floor(seed(x)*(b-a+1))+a;}
 
@@ -1045,9 +1079,12 @@ function buildRecos(){
       // a store that currently has 0 SKUs gets variety on the shelf before existing
       // SKUs get top-ups.
       DATA=injected.concat(DATA.filter(d=>!d._synthetic));
+      bumpDataVersion();
     } else {
       // Still wipe stale synthetic rows from prior runs even if nothing new gets injected
+      const prevLen=DATA.length;
       DATA=DATA.filter(d=>!d._synthetic);
+      if(DATA.length!==prevLen) bumpDataVersion();
     }
   }
 
@@ -2319,6 +2356,7 @@ function populateInvFilters(){
   if(typeof updateFilterCounts==='function') updateFilterCounts();
 }
 
+let _invRenderCache={sig:null};
 function renderInv(){
   // Inventory tab is driven ONLY by its own filters — not by Store Selection tab (S.sel).
   // Store Selection tab governs replenishment scope, not Inventory views.
@@ -2331,12 +2369,16 @@ function renderInv(){
   // Column-header label: short for table width, full name lives in the dropdown title attrs
   const fcLabel={trend:'Trend',wma:'Wtd Avg',seasonal:'Seasonal',exp:'Exp Smooth'}[fcModel]||'Trend';
 
-  // Helper: cap for a brand+type+store counted ONCE (not per SKU row)
-  function storeCapOnce(stData,storeId){
-    const seen=new Set();let cap=0;
-    stData.forEach(d=>{const k=d.brand+'|'+d.type;if(!seen.has(k)){cap+=(S.CAP[storeId]?.[d.brand]?.[d.type]||0);seen.add(k);}});
-    return cap;
-  }
+  // ── Memoization: skip the whole render if no inputs changed since last call.
+  // Cache signature = (data/cap/wh version tokens) + (filter selections) + (forecast model).
+  // Tokens are bumped by mutating functions (applyCapToData, processWHRows, etc.).
+  const cacheSig=JSON.stringify({
+    dv:S._dataVersion||0,cv:S._capVersion||0,wv:S._whVersion||0,
+    s:invStoreFilter,b:invBrandFilter,t:invTypeFilter,fc:fcModel
+  });
+  if(_invRenderCache.sig===cacheSig) return;
+  _invRenderCache.sig=cacheSig;
+
   // Helper: trend % normalized to same period (90d vs PY 120d)
   function trendPct(vel90,py120){if(!py120||!hasPY) return null;const pyN=py120*0.75;return pyN>0?Math.round((vel90/pyN-1)*100):null;}
   // Forecast helpers — Trend, WMA, Seasonal Index, Exponential
@@ -2348,11 +2390,52 @@ function renderInv(){
   function fmt30(v){return v===null?'—':Math.round(v/3).toLocaleString();}
   function fmt90(v){return v===null?'—':v.toLocaleString();}
 
-  // ── Apply filters ──────────────────────────────────────────────
-  let allSelRows=DATA.filter(d=>sel.includes(d.storeId));
-  if(invStoreFilter.length) allSelRows=allSelRows.filter(d=>invStoreFilter.includes(d.storeId));
-  if(invBrandFilter.length) allSelRows=allSelRows.filter(d=>invBrandFilter.includes(d.brand));
-  if(invTypeFilter.length) allSelRows=allSelRows.filter(d=>invTypeFilter.includes(d.type));
+  // ── Filter pass + single-pass aggregation ──────────────────────────
+  // One traversal of DATA builds:
+  //   - allSelRowsLen: count of rows surviving filters
+  //   - perStore: per-store totals (units, vel, py, sku count, dedup'd capacity)
+  //   - aggByBT:  brand×type aggregates (onHand, vel, py, cap, byStore, whQty)
+  // Replaces the previous 8+ separate scans/filters of DATA.
+  const storeSet=new Set(sel);
+  const sFilterSet=invStoreFilter.length?new Set(invStoreFilter):null;
+  const bFilterSet=invBrandFilter.length?new Set(invBrandFilter):null;
+  const tFilterSet=invTypeFilter.length?new Set(invTypeFilter):null;
+  const perStore={};       // sid -> {units,vel,py,skus,cap,capSeen:Set}
+  const aggByBT={};        // brand|||type -> aggregate
+  const capSeenInv=new Set();
+  const aggWHSeenInv=new Set();
+  let allSelRowsLen=0;
+  for(let i=0;i<DATA.length;i++){
+    const d=DATA[i];
+    if(!storeSet.has(d.storeId)) continue;
+    if(sFilterSet&&!sFilterSet.has(d.storeId)) continue;
+    if(bFilterSet&&!bFilterSet.has(d.brand)) continue;
+    if(tFilterSet&&!tFilterSet.has(d.type)) continue;
+    allSelRowsLen++;
+    // Per-store totals
+    let ps=perStore[d.storeId];
+    if(!ps){ ps={units:0,vel:0,py:0,skus:0,cap:0,capSeen:new Set()}; perStore[d.storeId]=ps; }
+    ps.units+=d.storeQty;
+    ps.vel+=d.velocity90;
+    ps.py+=(d.priorYear90||0);
+    if(d.storeQty>0) ps.skus++;
+    const btKey=d.brand+'|'+d.type;
+    if(!ps.capSeen.has(btKey)){
+      ps.cap+=(S.CAP[d.storeId]?.[d.brand]?.[d.type]||0);
+      ps.capSeen.add(btKey);
+    }
+    // Brand × Type aggregate
+    const k=d.brand+'|||'+d.type;
+    let ab=aggByBT[k];
+    if(!ab){ ab={brand:d.brand,type:d.type,onHand:0,vel90:0,py120:0,cap:0,whQty:0,byStore:{}}; aggByBT[k]=ab; }
+    ab.onHand+=d.storeQty;
+    ab.vel90+=d.velocity90;
+    ab.py120+=(d.priorYear90||0);
+    const ck=d.storeId+'|'+d.brand+'|'+d.type;
+    if(!capSeenInv.has(ck)){ ab.cap+=(S.CAP[d.storeId]?.[d.brand]?.[d.type]||0); capSeenInv.add(ck); }
+    ab.byStore[d.storeId]=(ab.byStore[d.storeId]||0)+d.storeQty;
+    if(d.sku && !aggWHSeenInv.has(d.sku)){ ab.whQty+=(d.whQty||0); aggWHSeenInv.add(d.sku); }
+  }
 
   // ── Store totals table ─────────────────────────────────────────
   const totalsHead=document.getElementById('invTotalsHead');
@@ -2362,13 +2445,13 @@ function renderInv(){
   if(totalsBody){
     let grandSkus=0,grandUnits=0,grandAvail=0,grandCap=0,grandVel=0,grandPY=0;
     const storeRows=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id))).map(st=>{
-      const stData=allSelRows.filter(d=>d.storeId===st.id);
-      if(!stData.length) return'';
-      const avail=stData.filter(d=>d.storeQty>0).length;
-      const units=stData.reduce((a,d)=>a+d.storeQty,0);
-      const cap=storeCapOnce(stData,st.id);
-      const vel=stData.reduce((a,d)=>a+d.velocity90,0);
-      const py=hasPY?stData.reduce((a,d)=>a+(d.priorYear90||0),0):0;
+      const ps=perStore[st.id];
+      if(!ps) return'';
+      const avail=ps.skus;
+      const units=ps.units;
+      const cap=ps.cap;
+      const vel=ps.vel;
+      const py=hasPY?ps.py:0;
       const pct=cap>0?Math.round(units/cap*100):0;
       const col=pct<30?'var(--red)':pct<60?'var(--amber)':pct<90?'var(--green)':'var(--blue)';
       const tr=trendPct(vel,py);
@@ -2409,25 +2492,10 @@ function renderInv(){
     </tr>`;
   }
 
-  // ── Brand × Type grouped summary ────────────────────────────────
-  const agg={};
-  const capSeen=new Set();
-  const aggWHSeen=new Set();
-  allSelRows.forEach(d=>{
-    const k=d.brand+'|||'+d.type;
-    if(!agg[k]) agg[k]={brand:d.brand,type:d.type,onHand:0,vel90:0,py120:0,cap:0,whQty:0,byStore:{}};
-    agg[k].onHand+=d.storeQty;
-    agg[k].vel90+=d.velocity90;
-    agg[k].py120+=(d.priorYear90||0);
-    // Cap counted once per brand+type+store
-    const ck=d.storeId+'|'+d.brand+'|'+d.type;
-    if(!capSeen.has(ck)){agg[k].cap+=(S.CAP[d.storeId]?.[d.brand]?.[d.type]||0);capSeen.add(ck);}
-    agg[k].byStore[d.storeId]=(agg[k].byStore[d.storeId]||0)+d.storeQty;
-    // WH qty counted once per SKU globally (same SKU never double-counted, even if it
-    // somehow appears under different brand/type buckets due to catalog inconsistencies)
-    if(d.sku && !aggWHSeen.has(d.sku)){agg[k].whQty+=(d.whQty||0);aggWHSeen.add(d.sku);}
-  });
-  const aggRows=Object.values(agg).sort((a,b)=>a.brand.localeCompare(b.brand)||a.type.localeCompare(b.type));
+  // ── Brand × Type grouped summary (built in single-pass loop above) ─
+  // aggByBT is the per-(brand, type) aggregate computed alongside perStore in the
+  // filter pass. Just sort and render.
+  const aggRows=Object.values(aggByBT).sort((a,b)=>a.brand.localeCompare(b.brand)||a.type.localeCompare(b.type));
   const countEl=document.getElementById('invCount');
   if(countEl){
     const selStoreCount=invStoreFilter.length||STORES.filter(st=>sel.includes(st.id)).length;
@@ -2642,6 +2710,7 @@ function processWHRows(rows){
         matched
       };
     });
+    bumpWhVersion();
 
     // Update whQty in DATA rows
     S.wh.forEach(w=>{
@@ -2702,6 +2771,7 @@ function clearWHContents(){
   }
   // Wipe state
   S.wh=[]; S.whRaw=[];
+  bumpWhVersion();
   DATA.forEach(d=>{ d.whQty=0; });
   // Recompute recos with empty WH
   if(typeof buildRecos==='function') buildRecos();
@@ -3313,6 +3383,7 @@ async function pullWHFromSupabase(manual=false){
     }
     if(!all.length){
       S.whRaw=[]; S.wh=[];
+      bumpWhVersion();
       setWHCloudStatus('No bin contents in cloud yet — upload to share','amber');
       if(manual) clog('☁ WH cloud is empty.');
       return;
@@ -3569,6 +3640,7 @@ function loadCapFromLocalStorage(){
 }
 function applyCapToData(){
   DATA.forEach(d=>{d.cap=(S.CAP[d.storeId]&&S.CAP[d.storeId][d.brand]&&S.CAP[d.storeId][d.brand][d.type])||0;});
+  bumpCapVersion();
 }
 function importCapFromFile(input){
   const file=input.files[0];if(!file) return;
@@ -3871,7 +3943,15 @@ async function loadLiveData(itemMap){
       const batch=allItemIds.slice(i,i+invBatchSize);
       const url='/admin/api/2024-01/inventory_levels.json?inventory_item_ids='+batch.join(',')+'&location_ids='+retailLocIds.join(',')+'&limit=250';
       const d=await shopifyFetch(url);allInv=[...allInv,...(d.inventory_levels||[])];
-      if(i%2500===0&&i>0) clog('  [INV] '+Math.min(i+invBatchSize,allItemIds.length)+'/'+allItemIds.length+' items fetched → '+allInv.length+' records');
+      // Per-batch progress (60 → 82): inventory pull takes ~3 min, this keeps the bar moving
+      const itemsDone=Math.min(i+invBatchSize,allItemIds.length);
+      const pct=60+Math.floor((itemsDone/allItemIds.length)*22);
+      setProgress(pct);
+      // Update visible status line every ~5% so connLog isn't spammed
+      if(i%(invBatchSize*10)===0){
+        set2BMsg('⏳ Step 2B — [2/3] Inventory '+itemsDone.toLocaleString()+'/'+allItemIds.length.toLocaleString()+' items · '+allInv.length.toLocaleString()+' records');
+      }
+      if(i%2500===0&&i>0) clog('  [INV] '+itemsDone+'/'+allItemIds.length+' items fetched → '+allInv.length+' records');
     }
     const invDedup=new Map();
     allInv.forEach(il=>{const k=String(il.inventory_item_id)+'|'+String(il.location_id);if(!invDedup.has(k)) invDedup.set(k,il);});
@@ -4389,6 +4469,7 @@ function processLiveData(locs,invLevels,orders){
   // Overlay saved capacity edits from localStorage (fast cache)
   loadCapFromLocalStorage();
   applyCapToData();
+  bumpDataVersion();  // DATA fully rebuilt above — invalidate Inventory render cache
   // Then pull from Supabase (shared source of truth across users) — non-blocking, overlays cloud values
   pullCapacityFromSupabase().catch(e=>clog('Cloud pull warning: '+e.message));
   S.liveData={stores:[...STORES],data:[...DATA],brands:[...BRANDS],types:[...TYPES]};
