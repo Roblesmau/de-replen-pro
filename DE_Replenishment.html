@@ -815,6 +815,7 @@
             &#127981; Upload Bin Contents
             <input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">
           </label>
+          <button id="btnWHSettings" onclick="toggleWHSettings()" style="margin-top:2px;background:transparent;color:var(--muted);border:1px solid var(--border2);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em" title="Column mapping + Location/Zone filters">&#9881; Upload settings</button>
           <button id="btnClearWH" onclick="clearWHContents()" style="display:none;margin-top:2px;background:transparent;color:var(--red);border:1px solid var(--red);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#10005; Clear WH</button>
         </div>
       </div>
@@ -827,6 +828,36 @@
         <button id="btnInspect" class="btn btn-secondary btn-sm" onclick="showTab('connect');document.getElementById('rawInspector').scrollIntoView({behavior:'smooth'});renderInspector()" disabled style="opacity:.4;cursor:not-allowed">&#128269; Inspect data</button>
       </div>
 
+    </div>
+    <!-- WH upload settings (column mapping + Location/Zone filter) -->
+    <div id="whSettingsPanel" style="display:none;margin-top:14px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">WH upload settings &mdash; column mapping + zone filter</span>
+        <button onclick="resetWHFilterDefaults()" class="btn btn-secondary btn-sm" title="Restore defaults: Location=DE-MAIN · Zones=GOLDEN, ZONE A, ZONE B, ZONE C">&#8634; Defaults (DE-MAIN / A,B,C,GOLDEN)</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+        <div class="field"><label>Sheet</label><select id="whColSheet" onchange="onWHSettingChange()"><option value="">(auto-detect)</option></select></div>
+        <div class="field"><label>SKU column (Item No)</label><select id="whColSku" onchange="onWHSettingChange()"></select></div>
+        <div class="field"><label>Bin Code column</label><select id="whColBin" onchange="onWHSettingChange()"></select></div>
+        <div class="field"><label>Quantity column</label><select id="whColQty" onchange="onWHSettingChange()"></select></div>
+        <div class="field"><label>Location Code column</label><select id="whColLoc" onchange="onWHSettingChange()"></select></div>
+        <div class="field"><label>Zone Code column</label><select id="whColZone" onchange="onWHSettingChange()"></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label class="filter-label" id="whFilterLocLabel">Allowed locations <span class="count-pill" id="whFilterLocCount"></span></label>
+          <select id="whFilterLoc" class="filter-multi" multiple aria-labelledby="whFilterLocLabel" onchange="onWHFilterChange()" style="height:140px"></select>
+          <span style="font-size:10px;color:var(--hint);line-height:1.3">Rows from other locations are excluded. Default: DE-MAIN.</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label class="filter-label" id="whFilterZoneLabel">Allowed zones <span class="count-pill" id="whFilterZoneCount"></span></label>
+          <select id="whFilterZone" class="filter-multi" multiple aria-labelledby="whFilterZoneLabel" onchange="onWHFilterChange()" style="height:140px"></select>
+          <span style="font-size:10px;color:var(--hint);line-height:1.3">Rows in other zones are excluded. Defaults: GOLDEN, ZONE A, ZONE B, ZONE C.</span>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.4">
+        Column mappings + filter selections persist across reloads (localStorage). Available options auto-populate from the most recent upload.
+      </div>
     </div>
     <!-- Step 2B progress indicator -->
     <div id="step2BStatus" style="display:none;margin-top:10px;padding:9px 13px;border-radius:var(--radius);font-size:12px;border:1px solid #85B7EB;background:var(--blue-bg);color:var(--blue)">
@@ -973,7 +1004,7 @@ const COST={'Ray-Ban':52,'Oakley':70,'Gucci':210,'Prada':215,'Tom Ford':180,'Mau
 const DCAP={'Ray-Ban':{Sunglasses:60,Optical:40,Kids:20},'Oakley':{Sunglasses:50,Optical:30,Kids:15},'Gucci':{Sunglasses:25,Optical:20,Kids:0},'Prada':{Sunglasses:25,Optical:20,Kids:0},'Tom Ford':{Sunglasses:25,Optical:20,Kids:0},'Maui Jim':{Sunglasses:40,Optical:25,Kids:10},'Versace':{Sunglasses:20,Optical:15,Kids:0},'Tiffany':{Sunglasses:15,Optical:12,Kids:0}};
 
 const VEL_TIERS_DEFAULT=[{minPerWeek:0,qty:1},{minPerWeek:1,qty:2},{minPerWeek:3,qty:3},{minPerWeek:7,qty:5}];
-const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),_dataVersion:0,_capVersion:0,_whVersion:0,
+const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],whColMap:{sheet:'',sku:'',bin:'',qty:'',loc:'',zone:''},whFilter:{locations:['DE-MAIN'],zones:['GOLDEN','ZONE A','ZONE B','ZONE C']},whAllLocations:['DE-MAIN'],whAllZones:['GOLDEN','ZONE A','ZONE B','ZONE C'],whAllSheets:[],whAllColumns:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),_dataVersion:0,_capVersion:0,_whVersion:0,
   raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
 };
 let DATA=[],charts={};
@@ -2592,66 +2623,233 @@ function parseCSVLine(line){
   fields.push(cur.trim());
   return fields;
 }
+// ===== WH upload settings (column mapping + Location/Zone filter) =====
+// Defaults match the Designer Eyes NAV export format. All saved per-user in localStorage.
+const WH_FILTER_DEFAULTS={
+  locations:['DE-MAIN'],
+  zones:['GOLDEN','ZONE A','ZONE B','ZONE C']
+};
+// Auto-detect helpers — find a column whose header contains any of the candidate substrings (case-insensitive)
+function _findCol(headers,candidates){
+  const lower=headers.map(h=>String(h||'').toLowerCase());
+  for(const c of candidates){
+    const ix=lower.indexOf(c.toLowerCase());
+    if(ix>=0) return headers[ix];
+  }
+  for(const c of candidates){
+    const ix=lower.findIndex(h=>h.includes(c.toLowerCase()));
+    if(ix>=0) return headers[ix];
+  }
+  return '';
+}
+function loadWHSettings(){
+  try{
+    const cm=JSON.parse(localStorage.getItem('de_wh_col_map')||'null');
+    S.whColMap=(cm&&typeof cm==='object')?cm:{sheet:'',sku:'',bin:'',qty:'',loc:'',zone:''};
+    const locs=JSON.parse(localStorage.getItem('de_wh_filter_locations')||'null');
+    const zones=JSON.parse(localStorage.getItem('de_wh_filter_zones')||'null');
+    S.whFilter={
+      locations:Array.isArray(locs)?locs.slice():WH_FILTER_DEFAULTS.locations.slice(),
+      zones:Array.isArray(zones)?zones.slice():WH_FILTER_DEFAULTS.zones.slice()
+    };
+    const allLocs=JSON.parse(localStorage.getItem('de_wh_all_locations')||'null');
+    const allZones=JSON.parse(localStorage.getItem('de_wh_all_zones')||'null');
+    S.whAllLocations=Array.isArray(allLocs)?allLocs.slice():WH_FILTER_DEFAULTS.locations.slice();
+    S.whAllZones=Array.isArray(allZones)?allZones.slice():WH_FILTER_DEFAULTS.zones.slice();
+    const sheets=JSON.parse(localStorage.getItem('de_wh_all_sheets')||'null');
+    S.whAllSheets=Array.isArray(sheets)?sheets.slice():[];
+    const cols=JSON.parse(localStorage.getItem('de_wh_all_columns')||'null');
+    S.whAllColumns=Array.isArray(cols)?cols.slice():[];
+  }catch(_){
+    S.whColMap={sheet:'',sku:'',bin:'',qty:'',loc:'',zone:''};
+    S.whFilter={locations:WH_FILTER_DEFAULTS.locations.slice(),zones:WH_FILTER_DEFAULTS.zones.slice()};
+    S.whAllLocations=WH_FILTER_DEFAULTS.locations.slice();
+    S.whAllZones=WH_FILTER_DEFAULTS.zones.slice();
+    S.whAllSheets=[];
+    S.whAllColumns=[];
+  }
+}
+function saveWHSettings(){
+  try{
+    localStorage.setItem('de_wh_col_map',JSON.stringify(S.whColMap));
+    localStorage.setItem('de_wh_filter_locations',JSON.stringify(S.whFilter.locations));
+    localStorage.setItem('de_wh_filter_zones',JSON.stringify(S.whFilter.zones));
+    localStorage.setItem('de_wh_all_locations',JSON.stringify(S.whAllLocations));
+    localStorage.setItem('de_wh_all_zones',JSON.stringify(S.whAllZones));
+    localStorage.setItem('de_wh_all_sheets',JSON.stringify(S.whAllSheets));
+    localStorage.setItem('de_wh_all_columns',JSON.stringify(S.whAllColumns));
+  }catch(_){}
+}
+function toggleWHSettings(){
+  const p=document.getElementById('whSettingsPanel');
+  if(!p) return;
+  if(p.style.display==='none'){ p.style.display='block'; renderWHSettings(); }
+  else p.style.display='none';
+}
+function resetWHFilterDefaults(){
+  S.whFilter={locations:WH_FILTER_DEFAULTS.locations.slice(),zones:WH_FILTER_DEFAULTS.zones.slice()};
+  saveWHSettings();
+  renderWHSettings();
+}
+function onWHSettingChange(){
+  S.whColMap.sheet=document.getElementById('whColSheet')?.value||'';
+  S.whColMap.sku=document.getElementById('whColSku')?.value||'';
+  S.whColMap.bin=document.getElementById('whColBin')?.value||'';
+  S.whColMap.qty=document.getElementById('whColQty')?.value||'';
+  S.whColMap.loc=document.getElementById('whColLoc')?.value||'';
+  S.whColMap.zone=document.getElementById('whColZone')?.value||'';
+  saveWHSettings();
+}
+function onWHFilterChange(){
+  const locEl=document.getElementById('whFilterLoc');
+  const zoneEl=document.getElementById('whFilterZone');
+  if(locEl) S.whFilter.locations=[...locEl.selectedOptions].map(o=>o.value);
+  if(zoneEl) S.whFilter.zones=[...zoneEl.selectedOptions].map(o=>o.value);
+  saveWHSettings();
+  // Update count pills
+  const lc=document.getElementById('whFilterLocCount');
+  const zc=document.getElementById('whFilterZoneCount');
+  if(lc) lc.textContent=`${S.whFilter.locations.length}/${S.whAllLocations.length||S.whFilter.locations.length}`;
+  if(zc) zc.textContent=`${S.whFilter.zones.length}/${S.whAllZones.length||S.whFilter.zones.length}`;
+}
+function renderWHSettings(){
+  // Populate column-mapper dropdowns from S.whAllColumns (discovered on last upload)
+  const cols=S.whAllColumns||[];
+  const sheets=S.whAllSheets||[];
+  const fillCol=(id,saved,placeholder)=>{
+    const el=document.getElementById(id);if(!el) return;
+    const opts=['<option value="">'+(placeholder||'(auto-detect)')+'</option>']
+      .concat(cols.map(c=>`<option value="${hesc(c)}"${c===saved?' selected':''}>${hesc(c)}</option>`));
+    el.innerHTML=opts.join('');
+  };
+  const shEl=document.getElementById('whColSheet');
+  if(shEl){
+    shEl.innerHTML='<option value="">(auto-detect)</option>'
+      +sheets.map(s=>`<option value="${hesc(s)}"${s===S.whColMap.sheet?' selected':''}>${hesc(s)}</option>`).join('');
+  }
+  fillCol('whColSku',S.whColMap.sku);
+  fillCol('whColBin',S.whColMap.bin);
+  fillCol('whColQty',S.whColMap.qty);
+  fillCol('whColLoc',S.whColMap.loc);
+  fillCol('whColZone',S.whColMap.zone);
+  // Populate location + zone multi-selects from S.whAllLocations / S.whAllZones,
+  // union'd with currently-saved selections (in case defaults aren't in the discovered list yet).
+  const locUnion=[...new Set([...(S.whAllLocations||[]),...(S.whFilter.locations||[])])].sort();
+  const zoneUnion=[...new Set([...(S.whAllZones||[]),...(S.whFilter.zones||[])])].sort();
+  const locSel=new Set(S.whFilter.locations||[]);
+  const zoneSel=new Set(S.whFilter.zones||[]);
+  const locEl=document.getElementById('whFilterLoc');
+  if(locEl) locEl.innerHTML=locUnion.map(v=>`<option value="${hesc(v)}"${locSel.has(v)?' selected':''}>${hesc(v)}</option>`).join('');
+  const zoneEl=document.getElementById('whFilterZone');
+  if(zoneEl) zoneEl.innerHTML=zoneUnion.map(v=>`<option value="${hesc(v)}"${zoneSel.has(v)?' selected':''}>${hesc(v)}</option>`).join('');
+  const lc=document.getElementById('whFilterLocCount');
+  const zc=document.getElementById('whFilterZoneCount');
+  if(lc) lc.textContent=`${locSel.size}/${locUnion.length||locSel.size}`;
+  if(zc) zc.textContent=`${zoneSel.size}/${zoneUnion.length||zoneSel.size}`;
+}
+
 function parseWH(input){
   const file=input.files[0];if(!file) return;
   const reader=new FileReader();
   reader.onload=e=>{
     try{
       let rows=[];
-      let rawBinRows=[]; // {bin_code, item_no, qty} — preserved for cloud sync
-      if(file.name.toLowerCase().endsWith('.csv')){
-        // Could be Shopify inventory CSV — but for WH we only need SKU+QTY
+      let rawBinRows=[]; // {bin_code, item_no, qty} — preserved for cloud sync (post-filter)
+      let totalScanned=0,excluded=0,missingLoc=0,missingZone=0;
+      let allHeaders=[],allSheets=[],discoveredLocs=new Set(),discoveredZones=new Set();
+      const cmap=S.whColMap||{};
+      const filterLocs=new Set((S.whFilter&&S.whFilter.locations)||[]);
+      const filterZones=new Set((S.whFilter&&S.whFilter.zones)||[]);
+      const isCsv=file.name.toLowerCase().endsWith('.csv');
+      let dataRows=[];
+      if(isCsv){
         const text=new TextDecoder().decode(e.target.result);
         const lines=text.split('\n').filter(l=>l.trim());
-        const hdrs=parseCSVLine(lines[0]).map(h=>h.toLowerCase());
-        const skuIdx=hdrs.findIndex(h=>h==='sku'||h==='item no.'||h==='item no');
-        const qtyIdx=hdrs.findIndex(h=>h.includes('quantity')||h.includes('on hand')||h==='qty');
-        const binIdx=hdrs.findIndex(h=>h==='bin code'||h==='bin'||h==='bincode');
-        if(skuIdx===-1||qtyIdx===-1) throw new Error('Cannot find SKU/Item No. and Quantity columns');
+        if(!lines.length) throw new Error('Empty CSV');
+        const hdrs=parseCSVLine(lines[0]);
+        allHeaders=hdrs.slice();
         for(let i=1;i<lines.length;i++){
           const cols=parseCSVLine(lines[i]);
-          const sku=normSku(cols[skuIdx]);
-          const qty=parseInt(cols[qtyIdx])||0;
-          const bin=binIdx>=0?String(cols[binIdx]||'').trim():'';
-          if(sku){ rows.push({sku,qty}); rawBinRows.push({bin_code:bin,item_no:sku,qty}); }
+          const obj={}; hdrs.forEach((h,j)=>{ obj[h]=cols[j]||''; });
+          dataRows.push(obj);
         }
       } else {
-        // Excel — supports both Warehouse Stock template AND NAV Bin Contents
         const wb=XLSX.read(e.target.result,{type:'array'});
-        const sn=wb.SheetNames.includes('Bin Contents List')?'Bin Contents List':
-                  wb.SheetNames.includes('Warehouse Stock')?'Warehouse Stock':wb.SheetNames[0];
-        const data=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''});
-        if(!data.length) throw new Error('No data found in sheet');
-        const first=data[0];
-        const isNAV='Item No.' in first||'Item No' in first;
-        // Helper: normalize any SKU — strip leading apostrophes, trim whitespace
-        if(isNAV){
-          // NAV Bin Contents: columns are Bin Code | Item No. | Available Qty. to Take
-          // Multiple rows per SKU (one per bin) — sum qty per Item No.
-          const totals={};
-          data.forEach(r=>{
-            const sku=normSku(r['Item No.']||r['Item No']||'');
-            const qty=parseFloat(r['Available Qty. to Take']||r['Quantity']||r['Qty']||0)||0;
-            const bin=String(r['Bin Code']||r['Bin']||'').trim();
-            if(sku&&sku!=='Item No.'){
-              totals[sku]=(totals[sku]||0)+qty;
-              rawBinRows.push({bin_code:bin,item_no:sku,qty:Math.round(qty)});
-            }
-          });
-          rows=Object.entries(totals).map(([sku,qty])=>({sku,qty:Math.round(qty)}));
-        } else {
-          // Standard warehouse template: SKU + Warehouse QTY
-          data.filter(r=>r['SKU']||r['sku']).forEach(r=>{
-            const sku=normSku(r['SKU']||r['sku']||'');
-            const qty=parseInt(r['Warehouse QTY']||r['QTY']||r['qty']||0)||0;
-            const bin=String(r['Bin Code']||r['Bin']||'').trim();
-            rows.push({sku,qty});
-            rawBinRows.push({bin_code:bin,item_no:sku,qty});
-          });
-        }
+        allSheets=wb.SheetNames.slice();
+        // Pick sheet: explicit override, then known names, then first
+        let sn=cmap.sheet&&wb.SheetNames.includes(cmap.sheet)?cmap.sheet:null;
+        if(!sn) sn=wb.SheetNames.includes('Bin Contents List')?'Bin Contents List':
+                    wb.SheetNames.includes('Warehouse Stock')?'Warehouse Stock':wb.SheetNames[0];
+        dataRows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''});
+        if(!dataRows.length) throw new Error('No data found in sheet "'+sn+'"');
+        allHeaders=Object.keys(dataRows[0]);
+      }
+      // Resolve columns: explicit mapping wins; otherwise auto-detect.
+      const colSku =cmap.sku &&allHeaders.includes(cmap.sku) ?cmap.sku :_findCol(allHeaders,['Item No.','Item No','SKU','sku']);
+      const colBin =cmap.bin &&allHeaders.includes(cmap.bin) ?cmap.bin :_findCol(allHeaders,['Bin Code','Bin','BinCode']);
+      const colQty =cmap.qty &&allHeaders.includes(cmap.qty) ?cmap.qty :_findCol(allHeaders,['Available Qty. to Take','Quantity','Qty','Warehouse QTY','QTY']);
+      const colLoc =cmap.loc &&allHeaders.includes(cmap.loc) ?cmap.loc :_findCol(allHeaders,['Location Code','Location']);
+      const colZone=cmap.zone&&allHeaders.includes(cmap.zone)?cmap.zone:_findCol(allHeaders,['Zone Code','Zone']);
+      // Hard-error if any configured column is missing in the file (Q3=b)
+      const missing=[];
+      if(!colSku) missing.push('SKU/Item No');
+      if(!colQty) missing.push('Quantity');
+      if(!colLoc) missing.push('Location Code');
+      if(!colZone) missing.push('Zone Code');
+      if(missing.length){
+        // Surface what we found so user can fix mapping
+        S.whAllSheets=allSheets;
+        S.whAllColumns=allHeaders;
+        saveWHSettings();
+        renderWHSettings();
+        throw new Error('Missing column(s): '+missing.join(', ')+'. Open Upload settings to map columns or add the missing headers to your file.');
+      }
+      // Walk rows: discover all locations/zones for the multi-select UI + apply filter
+      const totals={};
+      dataRows.forEach(r=>{
+        totalScanned++;
+        const sku=normSku(r[colSku]||'');
+        if(!sku||sku.toLowerCase()==='item no.') return;
+        const qty=parseFloat(r[colQty]||0)||0;
+        const bin=String(r[colBin]||'').trim();
+        const loc=String(r[colLoc]||'').trim();
+        const zone=String(r[colZone]||'').trim();
+        if(loc) discoveredLocs.add(loc);
+        if(zone) discoveredZones.add(zone);
+        if(!loc){ missingLoc++; excluded++; return; }
+        if(!zone){ missingZone++; excluded++; return; }
+        if(!filterLocs.has(loc)){ excluded++; return; }
+        if(!filterZones.has(zone)){ excluded++; return; }
+        totals[sku]=(totals[sku]||0)+qty;
+        rawBinRows.push({bin_code:bin,item_no:sku,qty:Math.round(qty)});
+      });
+      rows=Object.entries(totals).map(([sku,qty])=>({sku,qty:Math.round(qty)}));
+      // Persist discovered options for the settings panel
+      S.whAllSheets=allSheets;
+      S.whAllColumns=allHeaders;
+      S.whAllLocations=[...new Set([...(S.whAllLocations||[]),...discoveredLocs])].sort();
+      S.whAllZones=[...new Set([...(S.whAllZones||[]),...discoveredZones])].sort();
+      saveWHSettings();
+      renderWHSettings();
+      if(!rows.length){
+        const detail=[];
+        if(missingLoc) detail.push(missingLoc.toLocaleString()+' rows missing Location');
+        if(missingZone) detail.push(missingZone.toLocaleString()+' rows missing Zone');
+        if(excluded) detail.push(excluded.toLocaleString()+' rows filtered out');
+        throw new Error('No rows passed the Location/Zone filter. '+(detail.length?'('+detail.join(' · ')+')':'')+' Check Upload settings.');
       }
       S.whRaw=rawBinRows;
       processWHRows(rows);
+      // Annotate the success status with the excluded count (Q6=a)
+      if(excluded>0){
+        const cur=document.getElementById('whStatus');
+        if(cur){
+          const extra=document.createElement('div');
+          extra.style.cssText='font-size:11px;color:var(--muted);margin-top:4px';
+          extra.textContent=`Filtered: ${rawBinRows.length.toLocaleString()} bin rows kept · ${excluded.toLocaleString()} excluded (${missingLoc?missingLoc+' no Location · ':''}${missingZone?missingZone+' no Zone · ':''}rest outside filter)`;
+          cur.appendChild(extra);
+        }
+      }
       // Auto-push to cloud (fire-and-forget; failures only log)
       if(typeof pushWHToSupabase==='function' && S.wh && S.wh.length){
         pushWHToSupabase().catch(err=>clog('☁ WH cloud push failed: '+err.message));
@@ -5048,7 +5246,7 @@ document.addEventListener('keydown',e=>{
 });
 
 // Init
-buildSample();loadVelTiers();loadExcFromLocalStorage();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
+buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
 if(typeof restoreVelTierPanel==='function') restoreVelTierPanel();
 showTab('connect');
 
