@@ -886,6 +886,30 @@
       </div>
 
     </div>
+    <!-- Step 3B overview: per-location summary of inventory_available -->
+    <div id="whInvAvailOverview" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>
+          <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">inventory_available — overview by location</span>
+          <span id="whInvAvailMaxSync" style="font-size:11px;color:var(--hint);margin-left:8px"></span>
+        </div>
+        <button onclick="refreshInvAvailOverview(true)" class="btn btn-secondary btn-sm" title="Re-fetch the full per-location summary">&#8634; Refresh overview</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table id="whInvAvailTable" style="width:100%;font-size:12px">
+          <thead><tr>
+            <th style="text-align:left">Location</th>
+            <th style="text-align:right">SKUs</th>
+            <th style="text-align:right">Available qty</th>
+          </tr></thead>
+          <tbody id="whInvAvailBody"></tbody>
+          <tfoot id="whInvAvailFoot" style="font-weight:600;border-top:2px solid var(--border2)"></tfoot>
+        </table>
+      </div>
+      <div id="whInvAvailNote" style="font-size:10px;color:var(--hint);margin-top:8px;line-height:1.4">
+        This summary shows every location in the table. Your active filter (Locations / Zones) only affects which rows feed the replenishment engine.
+      </div>
+    </div>
     <!-- WH upload settings (column mapping + Location/Zone filter) -->
     <div id="whSettingsPanel" style="display:none;margin-top:14px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -3800,7 +3824,11 @@ async function setWHSource(target,opts){
   if(typeof hidePostRunCards==='function') hidePostRunCards();
   if(target==='supabase'){
     await pullFromInventoryAvailable(true);
+    if(typeof refreshInvAvailOverview==='function') refreshInvAvailOverview(false).catch(()=>{});
   } else {
+    // Hide the overview when leaving Supabase mode
+    const ov=document.getElementById('whInvAvailOverview');
+    if(ov) ov.style.display='none';
     // Try to repopulate from de_wh_bins (the last uploaded file's cloud copy)
     if(typeof pullWHFromSupabase==='function') pullWHFromSupabase(false).catch(()=>{});
   }
@@ -3812,6 +3840,79 @@ function refreshWHAfterStep2B(){
   if(S.whSource!=='supabase') return;
   if(typeof pullFromInventoryAvailable==='function'){
     pullFromInventoryAvailable(false).catch(()=>{});
+  }
+  if(typeof refreshInvAvailOverview==='function'){
+    refreshInvAvailOverview(false).catch(()=>{});
+  }
+}
+
+// ===== Step 3B overview: per-location summary across the entire inventory_available table =====
+// Mirrors the SQL:
+//   select location_code, count(*) as skus, sum(available_qty) as available, max(synced_at)
+//   from inventory_available group by location_code order by location_code;
+// PostgREST has no GROUP BY in the URL grammar, so we fetch a lean projection and
+// aggregate client-side. ~30k rows × 3 columns is trivial.
+async function refreshInvAvailOverview(manual){
+  const {url,key}=getSBCreds();
+  if(!url||!key) return;
+  const wrap=document.getElementById('whInvAvailOverview');
+  if(wrap && S.whSource==='supabase') wrap.style.display='block';
+  const body=document.getElementById('whInvAvailBody');
+  const foot=document.getElementById('whInvAvailFoot');
+  const sync=document.getElementById('whInvAvailMaxSync');
+  if(sync) sync.textContent='Loading…';
+  try{
+    let all=[]; let from=0; const pageSize=1000;
+    while(true){
+      const path='/inventory_available?select=location_code,available_qty,synced_at&order=location_code&limit='+pageSize+'&offset='+from;
+      const page=await sbFetch(path);
+      if(!Array.isArray(page)||!page.length) break;
+      all=all.concat(page);
+      if(page.length<pageSize) break;
+      from+=pageSize;
+    }
+    const byLoc={};
+    let maxSync=null;
+    all.forEach(r=>{
+      const loc=r.location_code||'(none)';
+      if(!byLoc[loc]) byLoc[loc]={location:loc,skus:0,available:0};
+      byLoc[loc].skus++;
+      byLoc[loc].available+=parseFloat(r.available_qty)||0;
+      if(r.synced_at){
+        const ts=new Date(r.synced_at).getTime();
+        if(!maxSync||ts>maxSync) maxSync=ts;
+      }
+    });
+    const rows=Object.values(byLoc).sort((a,b)=>a.location.localeCompare(b.location));
+    if(body){
+      body.innerHTML=rows.map(r=>`<tr>
+        <td>${hesc(r.location)}</td>
+        <td class="mono" style="text-align:right">${r.skus.toLocaleString()}</td>
+        <td class="mono" style="text-align:right">${Math.round(r.available).toLocaleString()}</td>
+      </tr>`).join('');
+    }
+    if(foot){
+      const totSkus=rows.reduce((a,r)=>a+r.skus,0);
+      const totAvail=rows.reduce((a,r)=>a+r.available,0);
+      foot.innerHTML=`<tr style="background:var(--bg)">
+        <td><strong>TOTAL</strong></td>
+        <td class="mono" style="text-align:right">${totSkus.toLocaleString()}</td>
+        <td class="mono" style="text-align:right">${Math.round(totAvail).toLocaleString()}</td>
+      </tr>`;
+    }
+    if(sync){
+      if(maxSync){
+        const ago=fmtRelTime(new Date(maxSync).toISOString());
+        const full=new Date(maxSync).toLocaleString();
+        sync.innerHTML=`Last sync: <strong>${ago}</strong>`;
+        sync.title='Most recent synced_at across all rows: '+full;
+      } else {
+        sync.textContent='Last sync: —';
+      }
+    }
+    if(manual) clog('☁ inventory_available overview: '+rows.length+' locations, '+all.length+' rows, max synced '+(maxSync?new Date(maxSync).toLocaleString():'—'));
+  }catch(e){
+    if(sync) sync.textContent='Overview unavailable: '+e.message;
   }
 }
 
@@ -5555,6 +5656,9 @@ function refreshLiveConnectCloudLabels(){
   if(S.whSource==='supabase'){
     if(typeof pullFromInventoryAvailable==='function'){
       pullFromInventoryAvailable(false).catch(()=>{});
+    }
+    if(typeof refreshInvAvailOverview==='function'){
+      refreshInvAvailOverview(false).catch(()=>{});
     }
   } else if(typeof pullWHFromSupabase==='function'){
     S._whCloudPulled=true;
