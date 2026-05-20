@@ -176,6 +176,31 @@
   }
   .filter-multi::-webkit-scrollbar-thumb:hover { background:var(--muted); }
 
+  /* WH source segmented toggle (Step 3A vs Step 3B) */
+  .wh-source-toggle {
+    display:inline-flex; gap:0; background:var(--bg);
+    border:1px solid var(--border2); border-radius:var(--radius); padding:3px; align-items:stretch;
+  }
+  .wh-src-seg {
+    background:transparent; border:none; cursor:pointer;
+    display:inline-flex; flex-direction:column; align-items:flex-start; gap:1px;
+    padding:6px 14px; border-radius:calc(var(--radius) - 2px);
+    color:var(--muted); font-family:inherit; text-align:left; transition:background .15s ease, color .15s ease;
+    min-width:160px;
+  }
+  .wh-src-seg:hover { background:var(--surface); color:var(--text); }
+  .wh-src-seg.active { background:var(--blue); color:#fff; box-shadow:0 1px 3px rgba(15,23,42,0.10); }
+  .wh-src-seg.active .wh-src-num,
+  .wh-src-seg.active .wh-src-name,
+  .wh-src-seg.active .wh-src-sub { color:#fff; }
+  .wh-src-num { font-size:10px; font-weight:700; letter-spacing:0.05em; color:var(--hint); text-transform:uppercase; }
+  .wh-src-name { font-size:13px; font-weight:600; color:var(--text); }
+  .wh-src-sub { font-size:10px; color:var(--hint); font-weight:400; }
+  [data-theme="dark"] .wh-src-seg.active { background:var(--blue); color:#0B0F1A; }
+  [data-theme="dark"] .wh-src-seg.active .wh-src-num,
+  [data-theme="dark"] .wh-src-seg.active .wh-src-name,
+  [data-theme="dark"] .wh-src-seg.active .wh-src-sub { color:#0B0F1A; }
+
   /* Inventory filter row — fluid grid that reflows on narrower viewports */
   .inv-filter-row {
     display:grid;
@@ -773,11 +798,24 @@
       <div class="field"><label>Supabase URL</label><input type="text" id="sbUrl" placeholder="https://xxxx.supabase.co"></div>
       <div class="field"><label>Supabase anon key</label><input type="password" id="sbKey" placeholder="eyJ..."></div>
     </div>
-    <!-- WH source indicator (Upload vs Supabase) — click to switch -->
-    <div id="whSourcePillWrap" style="margin-bottom:10px;display:flex;align-items:center;gap:8px;font-size:11px">
-      <span style="color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;font-weight:600">WH source:</span>
-      <button id="whSourcePill" onclick="toggleWHSource()" title="Click to switch between Excel upload and Supabase inventory_available" style="background:var(--surface);color:var(--text);border:1px solid var(--border2);padding:4px 12px;font-size:11px;font-weight:500;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span id="whSourcePillDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted)"></span><span id="whSourcePillText">Excel upload</span></button>
-      <span id="whSourcePillDetail" style="color:var(--hint);font-size:11px"></span>
+    <!-- WH source segmented toggle — pick which Step 3 path runs after Step 2B -->
+    <div id="whSourceWrap" style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <span style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">WH source</span>
+        <span style="font-size:10px;color:var(--hint)">Runs after Step 2B finishes</span>
+      </div>
+      <div role="radiogroup" aria-label="WH source" class="wh-source-toggle">
+        <button id="whSrcBtnUpload" type="button" role="radio" aria-checked="false" onclick="selectWHSource('upload')" class="wh-src-seg">
+          <span class="wh-src-num">3A</span>
+          <span class="wh-src-name">Excel upload</span>
+          <span class="wh-src-sub" id="whSrcSubUpload">no file loaded</span>
+        </button>
+        <button id="whSrcBtnSupabase" type="button" role="radio" aria-checked="false" onclick="selectWHSource('supabase')" class="wh-src-seg">
+          <span class="wh-src-num">3B</span>
+          <span class="wh-src-name">Supabase live</span>
+          <span class="wh-src-sub" id="whSrcSubSupabase">not loaded</span>
+        </button>
+      </div>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
 
@@ -3676,39 +3714,48 @@ function loadWHSource(){
   }catch(_){ S.whSource='upload'; }
 }
 function updateWHSourcePill(){
-  const dot=document.getElementById('whSourcePillDot');
-  const txt=document.getElementById('whSourcePillText');
-  const det=document.getElementById('whSourcePillDetail');
-  if(!dot||!txt) return;
   const isSb=S.whSource==='supabase';
-  txt.textContent=isSb?'Supabase inventory_available':'Excel upload (de_wh_bins)';
-  if(isSb){
-    if(S.whInvAvail.lastError){
-      dot.style.background='var(--amber)';
-      det.textContent='last refresh failed';
-    } else if(S.whInvAvail.lastSync){
-      dot.style.background='var(--green)';
+  // Sub-text for each segment
+  const subA=document.getElementById('whSrcSubUpload');
+  const subB=document.getElementById('whSrcSubSupabase');
+  if(subA){
+    subA.textContent=(S.whSource==='upload'&&(S.wh||[]).length)
+      ? `${S.wh.length.toLocaleString()} SKUs loaded`
+      : (S.whSource==='upload' ? 'no file loaded' : 'standby');
+  }
+  if(subB){
+    if(S.whSource==='supabase' && S.whInvAvail.lastError){
+      subB.textContent='last refresh failed';
+    } else if(S.whSource==='supabase' && S.whInvAvail.lastSync){
       const ago=fmtRelTime(new Date(S.whInvAvail.lastSync).toISOString());
-      det.textContent=`${S.whInvAvail.rowCount.toLocaleString()} SKUs · synced ${ago} · refreshes after Step 2B`;
+      subB.textContent=`${S.whInvAvail.rowCount.toLocaleString()} SKUs · synced ${ago}`;
     } else {
-      dot.style.background='var(--muted)';
-      det.textContent='not loaded yet';
-    }
-  } else {
-    if((S.wh||[]).length){
-      dot.style.background='var(--green)';
-      det.textContent=`${S.wh.length.toLocaleString()} SKUs loaded`;
-    } else {
-      dot.style.background='var(--muted)';
-      det.textContent='no file loaded';
+      subB.textContent=(S.whSource==='supabase')?'not loaded yet':'standby';
     }
   }
-  // Dim the inactive Step's primary button so it's clear which mode is on.
+  // Active class toggling
+  const segA=document.getElementById('whSrcBtnUpload');
+  const segB=document.getElementById('whSrcBtnSupabase');
+  if(segA){ segA.classList.toggle('active',!isSb); segA.setAttribute('aria-checked',(!isSb).toString()); }
+  if(segB){ segB.classList.toggle('active',isSb); segB.setAttribute('aria-checked',isSb.toString()); }
+  // Dim the inactive Step column so the active path is unmistakable
   const colA=document.getElementById('step3aCol');
   const colB=document.getElementById('step3bCol');
   if(colA) colA.style.opacity=isSb?'0.55':'1';
   if(colB) colB.style.opacity=isSb?'1':'0.55';
 }
+async function selectWHSource(target){
+  // Idempotent: clicking the already-active segment manually refreshes that source.
+  if(S.whSource===target){
+    if(target==='supabase' && typeof pullFromInventoryAvailable==='function'){
+      await pullFromInventoryAvailable(true);
+    }
+    updateWHSourcePill();
+    return;
+  }
+  await setWHSource(target,{interactive:true});
+}
+// Backward-compat alias for any old callers
 async function toggleWHSource(){
   const target=S.whSource==='supabase'?'upload':'supabase';
   await setWHSource(target,{interactive:true});
