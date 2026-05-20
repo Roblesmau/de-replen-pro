@@ -773,6 +773,12 @@
       <div class="field"><label>Supabase URL</label><input type="text" id="sbUrl" placeholder="https://xxxx.supabase.co"></div>
       <div class="field"><label>Supabase anon key</label><input type="password" id="sbKey" placeholder="eyJ..."></div>
     </div>
+    <!-- WH source indicator (Upload vs Supabase) — click to switch -->
+    <div id="whSourcePillWrap" style="margin-bottom:10px;display:flex;align-items:center;gap:8px;font-size:11px">
+      <span style="color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;font-weight:600">WH source:</span>
+      <button id="whSourcePill" onclick="toggleWHSource()" title="Click to switch between Excel upload and Supabase inventory_available" style="background:var(--surface);color:var(--text);border:1px solid var(--border2);padding:4px 12px;font-size:11px;font-weight:500;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span id="whSourcePillDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted)"></span><span id="whSourcePillText">Excel upload</span></button>
+      <span id="whSourcePillDetail" style="color:var(--hint);font-size:11px"></span>
+    </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
 
       <!-- Step 1 -->
@@ -805,11 +811,11 @@
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
 
-      <!-- Step 3: WH Bin Contents -->
-      <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3 &mdash; WH Bin Contents</span>
+      <!-- Step 3A: Upload Bin Contents (Excel) -->
+      <div id="step3aCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3A &mdash; Upload</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
-          <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch latest WH bin contents from Supabase (shared cloud copy)">&#9889; Load from cloud</button>
+          <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch the last uploaded NAV file from Supabase (de_wh_bins)">&#9889; Load from cloud</button>
           <span id="whCloudSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud&hellip;</span>
           <label id="btnWH" class="btn btn-secondary btn-sm" style="cursor:pointer;opacity:.4;pointer-events:none">
             &#127981; Upload Bin Contents
@@ -817,6 +823,20 @@
           </label>
           <button id="btnWHSettings" onclick="toggleWHSettings()" style="margin-top:2px;background:transparent;color:var(--muted);border:1px solid var(--border2);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em" title="Column mapping + Location/Zone filters">&#9881; Upload settings</button>
           <button id="btnClearWH" onclick="clearWHContents()" style="display:none;margin-top:2px;background:transparent;color:var(--red);border:1px solid var(--red);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#10005; Clear WH</button>
+        </div>
+      </div>
+
+      <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
+
+      <!-- Step 3B: Load from Supabase inventory_available -->
+      <div id="step3bCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3B &mdash; Supabase</span>
+        <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
+          <button id="btnWHInvAvail" class="btn btn-green btn-sm" onclick="onClickStep3B()" title="Read live availability from inventory_available (auto-refreshes every 5 min while active)">&#9729; Load from Supabase</button>
+          <span id="whInvAvailSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Not loaded</span>
+          <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);cursor:pointer;user-select:none" title="Auto-refresh every 5 minutes while Step 3B is active">
+            <input type="checkbox" id="whAutoRefreshToggle" onchange="onAutoRefreshToggle(this.checked)" style="margin:0;cursor:pointer"> Auto-refresh 5m
+          </label>
         </div>
       </div>
 
@@ -1004,7 +1024,7 @@ const COST={'Ray-Ban':52,'Oakley':70,'Gucci':210,'Prada':215,'Tom Ford':180,'Mau
 const DCAP={'Ray-Ban':{Sunglasses:60,Optical:40,Kids:20},'Oakley':{Sunglasses:50,Optical:30,Kids:15},'Gucci':{Sunglasses:25,Optical:20,Kids:0},'Prada':{Sunglasses:25,Optical:20,Kids:0},'Tom Ford':{Sunglasses:25,Optical:20,Kids:0},'Maui Jim':{Sunglasses:40,Optical:25,Kids:10},'Versace':{Sunglasses:20,Optical:15,Kids:0},'Tiffany':{Sunglasses:15,Optical:12,Kids:0}};
 
 const VEL_TIERS_DEFAULT=[{minPerWeek:0,qty:1},{minPerWeek:1,qty:2},{minPerWeek:3,qty:3},{minPerWeek:7,qty:5}];
-const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],whColMap:{sheet:'',sku:'',bin:'',qty:'',loc:'',zone:''},whFilter:{locations:['DE-MAIN'],zones:['GOLDEN','ZONE A','ZONE B','ZONE C']},whAllLocations:['DE-MAIN'],whAllZones:['GOLDEN','ZONE A','ZONE B','ZONE C'],whAllSheets:[],whAllColumns:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),_dataVersion:0,_capVersion:0,_whVersion:0,
+const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],whSource:'upload',whInvAvail:{lastSync:null,rowCount:0,autoRefresh:true,lastError:null},whColMap:{sheet:'',sku:'',bin:'',qty:'',loc:'',zone:''},whFilter:{locations:['DE-MAIN'],zones:['GOLDEN','ZONE A','ZONE B','ZONE C']},whAllLocations:['DE-MAIN'],whAllZones:['GOLDEN','ZONE A','ZONE B','ZONE C'],whAllSheets:[],whAllColumns:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),_dataVersion:0,_capVersion:0,_whVersion:0,_whAutoRefreshTimer:null,
   raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
 };
 let DATA=[],charts={};
@@ -2750,6 +2770,17 @@ function renderWHSettings(){
 
 function parseWH(input){
   const file=input.files[0];if(!file) return;
+  // Mutual exclusion: if Supabase mode is active, confirm switching to upload mode.
+  // If user cancels, abort the upload and reset the file input.
+  if(S.whSource==='supabase'){
+    const ok=confirm('Switch WH source from Supabase auto-refresh to Excel upload?\n\nThe Supabase data will be replaced by this file. Click OK to continue.');
+    if(!ok){ try{ input.value=''; }catch(_){} return; }
+    // Stop the auto-refresh timer now; the rest of the switch happens after the file parses.
+    if(S._whAutoRefreshTimer){ clearInterval(S._whAutoRefreshTimer); S._whAutoRefreshTimer=null; }
+    S.whSource='upload';
+    saveWHSource();
+    updateWHSourcePill();
+  }
   const reader=new FileReader();
   reader.onload=e=>{
     try{
@@ -3561,6 +3592,208 @@ function setWHCloudStatus(text,color){
   el.style.color=col;
   el.innerHTML=text;
 }
+// ===== Step 3B: live availability from public.inventory_available =====
+// Schema (Designer Eyes):
+//   item_no text, location_code text, total_inventory numeric, reserved_for_picking numeric,
+//   reserved_for_ato numeric, available_qty numeric, number_of_bins int, sample_zone text,
+//   synced_at timestamptz, row_hash text. PK (item_no, location_code).
+// We use available_qty (excludes reservations) as the WH quantity for replenishment.
+function setWHInvAvailStatus(text,color){
+  const el=document.getElementById('whInvAvailSync');
+  if(!el) return;
+  const col=color==='green'?'var(--green)':color==='amber'?'var(--amber)':color==='red'?'var(--red)':'var(--muted)';
+  el.style.color=col;
+  el.innerHTML=text;
+}
+async function pullFromInventoryAvailable(manual=false){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setWHInvAvailStatus('Supabase not configured'); return; }
+  // Server-side filters: only non-zero availability + only allowed locations (Q4=a).
+  // Zone filter is applied client-side since sample_zone is a single value per row.
+  const filterLocs=(S.whFilter&&S.whFilter.locations)||[];
+  const filterZones=new Set((S.whFilter&&S.whFilter.zones)||[]);
+  try{
+    if(!manual){
+      // Silent auto-refresh — keep current status until done so user doesn't see flicker
+    } else {
+      setWHInvAvailStatus('&#9729; Loading from Supabase&hellip;');
+    }
+    let all=[]; let from=0; const pageSize=1000;
+    // Build location filter clause if any
+    const locClause=filterLocs.length?'&location_code=in.('+filterLocs.map(l=>encodeURIComponent('"'+l+'"')).join(',')+')':'';
+    while(true){
+      const path='/inventory_available?select=item_no,location_code,available_qty,sample_zone,number_of_bins,synced_at'
+        +'&available_qty=gt.0'+locClause
+        +'&order=item_no&limit='+pageSize+'&offset='+from;
+      const page=await sbFetch(path);
+      if(!Array.isArray(page)||!page.length) break;
+      all=all.concat(page);
+      if(page.length<pageSize) break;
+      from+=pageSize;
+    }
+    // Client-side Zone filter (skip if filter empty)
+    let kept=all;
+    if(filterZones.size) kept=all.filter(r=>r.sample_zone&&filterZones.has(r.sample_zone));
+    const excluded=all.length-kept.length;
+    // Aggregate to per-SKU total (in case multiple locations remain after filter)
+    const totals={};
+    const rawBin=[];
+    let latestSync=null;
+    kept.forEach(r=>{
+      const sku=normSku(r.item_no||'');
+      if(!sku) return;
+      const qty=Math.round(parseFloat(r.available_qty)||0);
+      if(qty<=0) return;
+      totals[sku]=(totals[sku]||0)+qty;
+      // S.whRaw entry per (sku, location) — bin_code is empty because this table is
+      // pre-aggregated; number_of_bins is informational only.
+      rawBin.push({bin_code:'',item_no:sku,qty});
+      if(r.synced_at){
+        const ts=new Date(r.synced_at).getTime();
+        if(!latestSync||ts>latestSync) latestSync=ts;
+      }
+    });
+    const rows=Object.entries(totals).map(([sku,qty])=>({sku,qty}));
+    S.whRaw=rawBin;
+    S.whInvAvail.lastSync=latestSync||Date.now();
+    S.whInvAvail.rowCount=rows.length;
+    S.whInvAvail.lastError=null;
+    processWHRows(rows);
+    const tsAgo=latestSync?fmtRelTime(new Date(latestSync).toISOString()):'just now';
+    setWHInvAvailStatus(`Synced <strong>${tsAgo}</strong> &middot; ${rows.length.toLocaleString()} SKUs / ${rawBin.length.toLocaleString()} rows${excluded?' &middot; '+excluded.toLocaleString()+' excluded by zone':''}`,'green');
+    updateWHSourcePill();
+    if(manual) clog('☁ inventory_available: '+rows.length+' SKUs / '+rawBin.length+' rows pulled · '+excluded+' excluded by zone filter');
+  }catch(e){
+    S.whInvAvail.lastError=e.message;
+    setWHInvAvailStatus('⚠ '+e.message,'amber');
+    updateWHSourcePill();
+    if(manual) clog('☁ inventory_available pull failed: '+e.message);
+  }
+}
+// ===== WH source switching + auto-refresh =====
+function saveWHSource(){
+  try{
+    localStorage.setItem('de_wh_source',S.whSource||'upload');
+    localStorage.setItem('de_wh_auto_refresh',S.whInvAvail.autoRefresh?'1':'0');
+  }catch(_){}
+}
+function loadWHSource(){
+  try{
+    const src=localStorage.getItem('de_wh_source');
+    S.whSource=(src==='supabase')?'supabase':'upload';
+    const ar=localStorage.getItem('de_wh_auto_refresh');
+    S.whInvAvail.autoRefresh=(ar===null)?true:(ar==='1');
+  }catch(_){ S.whSource='upload'; S.whInvAvail.autoRefresh=true; }
+}
+function updateWHSourcePill(){
+  const dot=document.getElementById('whSourcePillDot');
+  const txt=document.getElementById('whSourcePillText');
+  const det=document.getElementById('whSourcePillDetail');
+  if(!dot||!txt) return;
+  const isSb=S.whSource==='supabase';
+  txt.textContent=isSb?'Supabase inventory_available':'Excel upload (de_wh_bins)';
+  if(isSb){
+    if(S.whInvAvail.lastError){
+      dot.style.background='var(--amber)';
+      det.textContent='last refresh failed';
+    } else if(S.whInvAvail.lastSync){
+      dot.style.background='var(--green)';
+      const ago=fmtRelTime(new Date(S.whInvAvail.lastSync).toISOString());
+      det.textContent=`${S.whInvAvail.rowCount.toLocaleString()} SKUs · synced ${ago}${S.whInvAvail.autoRefresh?' · auto-refresh on':' · manual only'}`;
+    } else {
+      dot.style.background='var(--muted)';
+      det.textContent='not loaded yet';
+    }
+  } else {
+    if((S.wh||[]).length){
+      dot.style.background='var(--green)';
+      det.textContent=`${S.wh.length.toLocaleString()} SKUs loaded`;
+    } else {
+      dot.style.background='var(--muted)';
+      det.textContent='no file loaded';
+    }
+  }
+  // Dim the inactive Step's primary button so it's clear which mode is on.
+  const colA=document.getElementById('step3aCol');
+  const colB=document.getElementById('step3bCol');
+  if(colA) colA.style.opacity=isSb?'0.55':'1';
+  if(colB) colB.style.opacity=isSb?'1':'0.55';
+  // Reflect auto-refresh checkbox state
+  const ar=document.getElementById('whAutoRefreshToggle');
+  if(ar) ar.checked=!!S.whInvAvail.autoRefresh;
+}
+async function toggleWHSource(){
+  const target=S.whSource==='supabase'?'upload':'supabase';
+  await setWHSource(target,{interactive:true});
+}
+async function onClickStep3B(){
+  // Mutual exclusion: if currently in upload mode with data, confirm before swap.
+  // If already in supabase mode, treat the click as a manual refresh.
+  if(S.whSource!=='supabase'){
+    await setWHSource('supabase',{interactive:true});
+  } else {
+    await pullFromInventoryAvailable(true);
+  }
+}
+async function setWHSource(target,opts){
+  opts=opts||{};
+  if(target!=='supabase'&&target!=='upload') return;
+  if(S.whSource===target&&!opts.force) return;
+  if(opts.interactive&&(S.wh||[]).length){
+    const msg=target==='supabase'
+      ? 'Switch WH source to Supabase inventory_available?\n\nYour current uploaded WH data will be replaced once the Supabase pull succeeds. Click OK to continue.'
+      : 'Switch WH source to Excel upload?\n\nThe Supabase auto-refresh will stop and the current data will be cleared. Click OK to continue.';
+    if(!confirm(msg)) return;
+  }
+  // Cancel any in-flight auto-refresh timer when leaving Supabase mode
+  if(target==='upload' && S._whAutoRefreshTimer){
+    clearInterval(S._whAutoRefreshTimer); S._whAutoRefreshTimer=null;
+  }
+  S.whSource=target;
+  saveWHSource();
+  // Wipe the OUTGOING source's data, then load the INCOMING source.
+  S.wh=[]; S.whRaw=[];
+  DATA.forEach(d=>{ d.whQty=0; });
+  bumpWhVersion();
+  if(typeof hidePostRunCards==='function') hidePostRunCards();
+  if(target==='supabase'){
+    await pullFromInventoryAvailable(true);
+    startWHAutoRefresh();
+  } else {
+    // Try to repopulate from de_wh_bins (the last uploaded file's cloud copy)
+    if(typeof pullWHFromSupabase==='function') pullWHFromSupabase(false).catch(()=>{});
+  }
+  updateWHSourcePill();
+}
+function startWHAutoRefresh(){
+  if(S._whAutoRefreshTimer){ clearInterval(S._whAutoRefreshTimer); S._whAutoRefreshTimer=null; }
+  if(S.whSource!=='supabase' || !S.whInvAvail.autoRefresh) return;
+  S._whAutoRefreshTimer=setInterval(()=>{
+    if(document.hidden) return; // pause when tab not visible
+    if(S.whSource!=='supabase') return;
+    pullFromInventoryAvailable(false).catch(()=>{});
+  },5*60*1000);
+}
+function onAutoRefreshToggle(checked){
+  S.whInvAvail.autoRefresh=!!checked;
+  saveWHSource();
+  if(checked) startWHAutoRefresh();
+  else if(S._whAutoRefreshTimer){ clearInterval(S._whAutoRefreshTimer); S._whAutoRefreshTimer=null; }
+  updateWHSourcePill();
+}
+// Pause/resume the timer on tab visibility change so we don't churn API calls
+// for hidden tabs. The interval still fires but its callback no-ops; this
+// listener forces an immediate refresh when the user returns.
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden && S.whSource==='supabase' && S.whInvAvail.autoRefresh){
+    // If it's been more than 5min since last sync, refresh immediately on return
+    const last=S.whInvAvail.lastSync||0;
+    if(Date.now()-last>5*60*1000){
+      pullFromInventoryAvailable(false).catch(()=>{});
+    }
+  }
+});
+
 async function pullWHFromSupabase(manual=false){
   const {url,key}=getSBCreds();
   if(!url||!key){
@@ -5246,7 +5479,7 @@ document.addEventListener('keydown',e=>{
 });
 
 // Init
-buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
+buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
 if(typeof restoreVelTierPanel==='function') restoreVelTierPanel();
 showTab('connect');
 
@@ -5289,15 +5522,22 @@ loadCredentials();
   const el=document.getElementById(id);if(el) el.addEventListener('change',saveCredentials);
 });
 // Populate cloud freshness labels AFTER loadCredentials has populated the input fields.
-// Step 2A reads Supabase de_sync_log (catalog cache); Step 3 pulls WH bins from de_wh_bins + de_wh_meta.
+// Step 2A reads Supabase de_sync_log (catalog cache); Step 3A pulls WH bins from de_wh_bins;
+// Step 3B pulls live availability from inventory_available (only if the user picked Supabase mode).
 function refreshLiveConnectCloudLabels(){
   if(typeof refreshCacheLastSync==='function'){
     refreshCacheLastSync().catch(()=>{});
   }
-  if(typeof pullWHFromSupabase==='function'){
+  if(S.whSource==='supabase'){
+    if(typeof pullFromInventoryAvailable==='function'){
+      pullFromInventoryAvailable(false).catch(()=>{});
+      if(typeof startWHAutoRefresh==='function') startWHAutoRefresh();
+    }
+  } else if(typeof pullWHFromSupabase==='function'){
     S._whCloudPulled=true;
     pullWHFromSupabase().catch(()=>{ S._whCloudPulled=false; });
   }
+  if(typeof updateWHSourcePill==='function') updateWHSourcePill();
 }
 setTimeout(refreshLiveConnectCloudLabels,200);
 </script>
