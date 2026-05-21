@@ -931,53 +931,27 @@
       </div>
 
     </div>
-    <!-- Step 3A overview: per-location summary of de_wh_bins (Excel upload cloud copy) -->
-    <div id="whUploadOverview" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
+    <!-- Unified WH overview panel — content swaps based on the active source (3A or 3B) -->
+    <div id="whOverviewPanel" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div>
-          <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">de_wh_bins — overview by location</span>
-          <span id="whUploadLastSync" style="font-size:11px;color:var(--hint);margin-left:8px"></span>
+          <span id="whOverviewTitle" style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">overview by location</span>
+          <span id="whOverviewSubtitle" style="font-size:11px;color:var(--hint);margin-left:8px"></span>
         </div>
-        <button onclick="refreshWHUploadOverview(true)" class="btn btn-secondary btn-sm" title="Re-fetch the per-location summary from de_wh_bins">&#8634; Refresh overview</button>
+        <button id="whOverviewRefreshBtn" onclick="refreshWHOverview(true)" class="btn btn-secondary btn-sm" title="Re-fetch the per-location summary">&#8634; Refresh overview</button>
       </div>
       <div class="table-scroll" style="max-height:40vh">
-        <table id="whUploadTable" style="width:100%;font-size:12px">
+        <table id="whOverviewTable" style="width:100%;font-size:12px">
           <thead><tr>
             <th style="text-align:left">Location</th>
             <th style="text-align:right">SKUs</th>
-            <th style="text-align:right">Qty</th>
+            <th style="text-align:right" id="whOverviewQtyHeader">Qty</th>
           </tr></thead>
-          <tbody id="whUploadBody"></tbody>
-          <tfoot id="whUploadFoot" style="font-weight:600;border-top:2px solid var(--border2)"></tfoot>
+          <tbody id="whOverviewBody"></tbody>
+          <tfoot id="whOverviewFoot" style="font-weight:600;border-top:2px solid var(--border2)"></tfoot>
         </table>
       </div>
-      <div id="whUploadNote" style="font-size:10px;color:var(--hint);margin-top:8px;line-height:1.4">
-        This summary reflects every location pushed to <code>de_wh_bins</code>. Rows with empty Location end up under <code>(none)</code>.
-      </div>
-    </div>
-    <!-- Step 3B overview: per-location summary of inventory_available -->
-    <div id="whInvAvailOverview" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <div>
-          <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">inventory_available — overview by location</span>
-          <span id="whInvAvailMaxSync" style="font-size:11px;color:var(--hint);margin-left:8px"></span>
-        </div>
-        <button onclick="refreshInvAvailOverview(true)" class="btn btn-secondary btn-sm" title="Re-fetch the full per-location summary">&#8634; Refresh overview</button>
-      </div>
-      <div style="overflow-x:auto">
-        <table id="whInvAvailTable" style="width:100%;font-size:12px">
-          <thead><tr>
-            <th style="text-align:left">Location</th>
-            <th style="text-align:right">SKUs</th>
-            <th style="text-align:right">Available qty</th>
-          </tr></thead>
-          <tbody id="whInvAvailBody"></tbody>
-          <tfoot id="whInvAvailFoot" style="font-weight:600;border-top:2px solid var(--border2)"></tfoot>
-        </table>
-      </div>
-      <div id="whInvAvailNote" style="font-size:10px;color:var(--hint);margin-top:8px;line-height:1.4">
-        This summary shows every location in the table. Your active filter (Locations / Zones) only affects which rows feed the replenishment engine.
-      </div>
+      <div id="whOverviewNote" style="font-size:10px;color:var(--hint);margin-top:8px;line-height:1.4"></div>
     </div>
     <!-- WH upload settings (column mapping + Location/Zone filter) -->
     <div id="whSettingsPanel" style="display:none;margin-top:14px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
@@ -3928,15 +3902,9 @@ async function setWHSource(target,opts){
   bumpWhVersion();
   if(typeof hidePostRunCards==='function') hidePostRunCards();
   if(target==='supabase'){
-    // Hide the upload overview, show Supabase
-    const upOv=document.getElementById('whUploadOverview');
-    if(upOv) upOv.style.display='none';
     await pullFromInventoryAvailable(true);
     if(typeof refreshInvAvailOverview==='function') refreshInvAvailOverview(false).catch(()=>{});
   } else {
-    // Hide the Supabase overview, show upload overview
-    const ov=document.getElementById('whInvAvailOverview');
-    if(ov) ov.style.display='none';
     // Try to repopulate from de_wh_bins (the last uploaded file's cloud copy)
     if(typeof pullWHFromSupabase==='function') pullWHFromSupabase(false).catch(()=>{});
     if(typeof refreshWHUploadOverview==='function') refreshWHUploadOverview(false).catch(()=>{});
@@ -3955,6 +3923,26 @@ function refreshWHAfterStep2B(){
   }
 }
 
+// ===== Unified WH overview dispatcher =====
+// Single panel (whOverviewPanel) whose content swaps based on the active WH source.
+// One function selects which underlying loader runs and renders into the shared
+// DOM nodes. Eliminates the "two panels stacked" race condition.
+function refreshWHOverview(manual){
+  if(S.whSource==='supabase'){
+    return refreshInvAvailOverview(manual);
+  } else {
+    return refreshWHUploadOverview(manual);
+  }
+}
+function hideWHOverviewPanel(){
+  const p=document.getElementById('whOverviewPanel');
+  if(p) p.style.display='none';
+}
+function showWHOverviewPanel(){
+  const p=document.getElementById('whOverviewPanel');
+  if(p) p.style.display='block';
+}
+
 // ===== Step 3A overview: per-location summary of de_wh_bins (Excel upload cloud copy) =====
 // Aggregates the entire cloud-stored upload by location_code so the user can see
 // what's in WH across every location they've pushed. Mirrors the SQL:
@@ -3962,13 +3950,21 @@ function refreshWHAfterStep2B(){
 //   from de_wh_bins group by location_code order by location_code;
 // Plus de_wh_meta for the "last upload by whom" attribution.
 async function refreshWHUploadOverview(manual){
+  // Guard: only render into the shared panel when 3A (upload) is the active source.
+  // Otherwise we'd overwrite the 3B view that the user is currently looking at.
+  if(S.whSource!=='upload'){ if(!manual) return; }
   const {url,key}=getSBCreds();
   if(!url||!key) return;
-  const wrap=document.getElementById('whUploadOverview');
-  if(wrap && S.whSource==='upload') wrap.style.display='block';
-  const body=document.getElementById('whUploadBody');
-  const foot=document.getElementById('whUploadFoot');
-  const sync=document.getElementById('whUploadLastSync');
+  showWHOverviewPanel();
+  const title=document.getElementById('whOverviewTitle');
+  const qtyHdr=document.getElementById('whOverviewQtyHeader');
+  const note=document.getElementById('whOverviewNote');
+  if(title) title.textContent='de_wh_bins — overview by location';
+  if(qtyHdr) qtyHdr.textContent='Qty';
+  if(note) note.innerHTML='This summary reflects every location pushed to <code>de_wh_bins</code>. Rows with empty Location end up under <code>(none)</code>.';
+  const body=document.getElementById('whOverviewBody');
+  const foot=document.getElementById('whOverviewFoot');
+  const sync=document.getElementById('whOverviewSubtitle');
   if(sync) sync.textContent='Loading…';
   try{
     let all=[]; let from=0; const pageSize=1000;
@@ -4035,13 +4031,20 @@ async function refreshWHUploadOverview(manual){
 // PostgREST has no GROUP BY in the URL grammar, so we fetch a lean projection and
 // aggregate client-side. ~30k rows × 3 columns is trivial.
 async function refreshInvAvailOverview(manual){
+  // Guard: only render into the shared panel when 3B (supabase) is the active source.
+  if(S.whSource!=='supabase'){ if(!manual) return; }
   const {url,key}=getSBCreds();
   if(!url||!key) return;
-  const wrap=document.getElementById('whInvAvailOverview');
-  if(wrap && S.whSource==='supabase') wrap.style.display='block';
-  const body=document.getElementById('whInvAvailBody');
-  const foot=document.getElementById('whInvAvailFoot');
-  const sync=document.getElementById('whInvAvailMaxSync');
+  showWHOverviewPanel();
+  const title=document.getElementById('whOverviewTitle');
+  const qtyHdr=document.getElementById('whOverviewQtyHeader');
+  const note=document.getElementById('whOverviewNote');
+  if(title) title.textContent='inventory_available — overview by location';
+  if(qtyHdr) qtyHdr.textContent='Available qty';
+  if(note) note.innerHTML='This summary shows every location in the table. Your active filter (Locations / Zones) only affects which rows feed the replenishment engine.';
+  const body=document.getElementById('whOverviewBody');
+  const foot=document.getElementById('whOverviewFoot');
+  const sync=document.getElementById('whOverviewSubtitle');
   if(sync) sync.textContent='Loading…';
   try{
     let all=[]; let from=0; const pageSize=1000;
