@@ -931,6 +931,30 @@
       </div>
 
     </div>
+    <!-- Step 3A overview: per-location summary of de_wh_bins (Excel upload cloud copy) -->
+    <div id="whUploadOverview" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>
+          <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">de_wh_bins — overview by location</span>
+          <span id="whUploadLastSync" style="font-size:11px;color:var(--hint);margin-left:8px"></span>
+        </div>
+        <button onclick="refreshWHUploadOverview(true)" class="btn btn-secondary btn-sm" title="Re-fetch the per-location summary from de_wh_bins">&#8634; Refresh overview</button>
+      </div>
+      <div class="table-scroll" style="max-height:40vh">
+        <table id="whUploadTable" style="width:100%;font-size:12px">
+          <thead><tr>
+            <th style="text-align:left">Location</th>
+            <th style="text-align:right">SKUs</th>
+            <th style="text-align:right">Qty</th>
+          </tr></thead>
+          <tbody id="whUploadBody"></tbody>
+          <tfoot id="whUploadFoot" style="font-weight:600;border-top:2px solid var(--border2)"></tfoot>
+        </table>
+      </div>
+      <div id="whUploadNote" style="font-size:10px;color:var(--hint);margin-top:8px;line-height:1.4">
+        This summary reflects every location pushed to <code>de_wh_bins</code>. Rows with empty Location end up under <code>(none)</code>.
+      </div>
+    </div>
     <!-- Step 3B overview: per-location summary of inventory_available -->
     <div id="whInvAvailOverview" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -3000,7 +3024,7 @@ function parseWH(input){
         if(!filterLocs.has(loc)){ excluded++; return; }
         if(!filterZones.has(zone)){ excluded++; return; }
         totals[sku]=(totals[sku]||0)+qty;
-        rawBinRows.push({bin_code:bin,item_no:sku,qty:Math.round(qty)});
+        rawBinRows.push({bin_code:bin,item_no:sku,qty:Math.round(qty),location_code:loc,zone_code:zone});
       });
       rows=Object.entries(totals).map(([sku,qty])=>({sku,qty:Math.round(qty)}));
       // Persist discovered options for the settings panel
@@ -3031,7 +3055,9 @@ function parseWH(input){
       }
       // Auto-push to cloud (fire-and-forget; failures only log)
       if(typeof pushWHToSupabase==='function' && S.wh && S.wh.length){
-        pushWHToSupabase().catch(err=>clog('☁ WH cloud push failed: '+err.message));
+        pushWHToSupabase().then(()=>{
+          if(typeof refreshWHUploadOverview==='function') refreshWHUploadOverview(false).catch(()=>{});
+        }).catch(err=>clog('☁ WH cloud push failed: '+err.message));
       }
     }catch(e){showWHStatus('✗ '+e.message,'s-err');}
     finally{ try{ input.value=''; }catch(_){} }
@@ -3902,14 +3928,18 @@ async function setWHSource(target,opts){
   bumpWhVersion();
   if(typeof hidePostRunCards==='function') hidePostRunCards();
   if(target==='supabase'){
+    // Hide the upload overview, show Supabase
+    const upOv=document.getElementById('whUploadOverview');
+    if(upOv) upOv.style.display='none';
     await pullFromInventoryAvailable(true);
     if(typeof refreshInvAvailOverview==='function') refreshInvAvailOverview(false).catch(()=>{});
   } else {
-    // Hide the overview when leaving Supabase mode
+    // Hide the Supabase overview, show upload overview
     const ov=document.getElementById('whInvAvailOverview');
     if(ov) ov.style.display='none';
     // Try to repopulate from de_wh_bins (the last uploaded file's cloud copy)
     if(typeof pullWHFromSupabase==='function') pullWHFromSupabase(false).catch(()=>{});
+    if(typeof refreshWHUploadOverview==='function') refreshWHUploadOverview(false).catch(()=>{});
   }
   updateWHSourcePill();
 }
@@ -3925,6 +3955,79 @@ function refreshWHAfterStep2B(){
   }
 }
 
+// ===== Step 3A overview: per-location summary of de_wh_bins (Excel upload cloud copy) =====
+// Aggregates the entire cloud-stored upload by location_code so the user can see
+// what's in WH across every location they've pushed. Mirrors the SQL:
+//   select location_code, count(distinct item_no) as skus, sum(qty) as qty
+//   from de_wh_bins group by location_code order by location_code;
+// Plus de_wh_meta for the "last upload by whom" attribution.
+async function refreshWHUploadOverview(manual){
+  const {url,key}=getSBCreds();
+  if(!url||!key) return;
+  const wrap=document.getElementById('whUploadOverview');
+  if(wrap && S.whSource==='upload') wrap.style.display='block';
+  const body=document.getElementById('whUploadBody');
+  const foot=document.getElementById('whUploadFoot');
+  const sync=document.getElementById('whUploadLastSync');
+  if(sync) sync.textContent='Loading…';
+  try{
+    let all=[]; let from=0; const pageSize=1000;
+    while(true){
+      const path='/de_wh_bins?select=location_code,item_no,qty&order=location_code&limit='+pageSize+'&offset='+from;
+      const page=await sbFetch(path);
+      if(!Array.isArray(page)||!page.length) break;
+      all=all.concat(page);
+      if(page.length<pageSize) break;
+      from+=pageSize;
+    }
+    // Aggregate: distinct SKUs per location + qty sum
+    const byLoc={};
+    all.forEach(r=>{
+      const loc=(r.location_code||'(none)').trim()||'(none)';
+      if(!byLoc[loc]) byLoc[loc]={location:loc,skus:new Set(),qty:0};
+      if(r.item_no) byLoc[loc].skus.add(normSku(r.item_no));
+      byLoc[loc].qty+=parseFloat(r.qty)||0;
+    });
+    const rows=Object.values(byLoc).map(r=>({location:r.location,skus:r.skus.size,qty:r.qty}))
+      .sort((a,b)=>a.location.localeCompare(b.location));
+    if(body){
+      if(!rows.length){
+        body.innerHTML='<tr><td colspan="3" style="text-align:center;color:var(--hint);padding:20px">Cloud is empty — upload a file or wait for someone else to push.</td></tr>';
+      } else {
+        body.innerHTML=rows.map(r=>`<tr>
+          <td>${hesc(r.location)}</td>
+          <td class="mono" style="text-align:right">${r.skus.toLocaleString()}</td>
+          <td class="mono" style="text-align:right">${Math.round(r.qty).toLocaleString()}</td>
+        </tr>`).join('');
+      }
+    }
+    if(foot){
+      const totSkus=rows.reduce((a,r)=>a+r.skus,0);
+      const totQty=rows.reduce((a,r)=>a+r.qty,0);
+      foot.innerHTML=rows.length?`<tr style="background:var(--bg)">
+        <td><strong>TOTAL</strong></td>
+        <td class="mono" style="text-align:right">${totSkus.toLocaleString()}</td>
+        <td class="mono" style="text-align:right">${Math.round(totQty).toLocaleString()}</td>
+      </tr>`:'';
+    }
+    // Read meta for "Last upload by whom"
+    let meta=null;
+    try{ const m=await sbFetch('/de_wh_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    if(sync){
+      if(meta && meta.last_uploaded_at){
+        const ago=fmtRelTime(meta.last_uploaded_at);
+        const who=meta.last_uploaded_by||'someone';
+        sync.innerHTML=`Last upload: <strong>${ago}</strong> by <strong>${hesc(who)}</strong>`;
+        sync.title='Most recent upload: '+new Date(meta.last_uploaded_at).toLocaleString();
+      } else {
+        sync.textContent=rows.length?'Last upload: —':'No uploads yet';
+      }
+    }
+    if(manual) clog('☁ de_wh_bins overview: '+rows.length+' locations, '+all.length+' rows');
+  }catch(e){
+    if(sync) sync.textContent='Overview unavailable: '+e.message;
+  }
+}
 // ===== Step 3B overview: per-location summary across the entire inventory_available table =====
 // Mirrors the SQL:
 //   select location_code, count(*) as skus, sum(available_qty) as available, max(synced_at)
@@ -4007,7 +4110,7 @@ async function pullWHFromSupabase(manual=false){
     setWHCloudStatus('&#9729; Pulling from cloud&hellip;');
     let all=[]; let from=0; const pageSize=1000;
     while(true){
-      const page=await sbFetch('/de_wh_bins?select=bin_code,item_no,qty&order=item_no&limit='+pageSize+'&offset='+from);
+      const page=await sbFetch('/de_wh_bins?select=bin_code,item_no,qty,location_code,zone_code&order=item_no&limit='+pageSize+'&offset='+from);
       if(!Array.isArray(page)||!page.length) break;
       all=all.concat(page);
       if(page.length<pageSize) break;
@@ -4020,8 +4123,8 @@ async function pullWHFromSupabase(manual=false){
       if(manual) clog('☁ WH cloud is empty.');
       return;
     }
-    // Store raw bin rows (preserves per-bin detail)
-    S.whRaw=all.map(r=>({bin_code:r.bin_code||'',item_no:normSku(r.item_no),qty:parseFloat(r.qty)||0}));
+    // Store raw bin rows (preserves per-bin detail + location/zone metadata)
+    S.whRaw=all.map(r=>({bin_code:r.bin_code||'',item_no:normSku(r.item_no),qty:parseFloat(r.qty)||0,location_code:r.location_code||'',zone_code:r.zone_code||''}));
     // Aggregate to SKU level for processWHRows
     const totals={};
     S.whRaw.forEach(r=>{ if(r.item_no) totals[r.item_no]=(totals[r.item_no]||0)+r.qty; });
@@ -4037,6 +4140,10 @@ async function pullWHFromSupabase(manual=false){
       const rc=meta.row_count||all.length;
       const sc=meta.sku_count||rows.length;
       setWHCloudStatus(`Last sync: <strong>${fmtRelTime(when)}</strong> by <strong>${who}</strong> &middot; ${rc.toLocaleString()} rows / ${sc.toLocaleString()} SKUs`,'green');
+      // Auto-refresh the by-location overview after a successful cloud pull
+      if(S.whSource==='upload' && typeof refreshWHUploadOverview==='function'){
+        refreshWHUploadOverview(false).catch(()=>{});
+      }
     } else {
       setWHCloudStatus(`Pulled ${all.length.toLocaleString()} rows / ${rows.length.toLocaleString()} SKUs (no meta record)`,'green');
     }
@@ -4066,6 +4173,8 @@ async function pushWHToSupabase(){
         bin_code:r.bin_code||'',
         item_no:normSku(r.item_no),
         qty:Number(r.qty)||0,
+        location_code:r.location_code||'',
+        zone_code:r.zone_code||'',
         uploaded_at:now,
         uploaded_by:who
       }));
@@ -4074,6 +4183,8 @@ async function pushWHToSupabase(){
         bin_code:'',
         item_no:normSku(w.sku),
         qty:Number(w.whQty)||0,
+        location_code:'',
+        zone_code:'',
         uploaded_at:now,
         uploaded_by:who
       }));
@@ -5742,6 +5853,9 @@ function refreshLiveConnectCloudLabels(){
   } else if(typeof pullWHFromSupabase==='function'){
     S._whCloudPulled=true;
     pullWHFromSupabase().catch(()=>{ S._whCloudPulled=false; });
+    if(typeof refreshWHUploadOverview==='function'){
+      refreshWHUploadOverview(false).catch(()=>{});
+    }
   }
   if(typeof updateWHSourcePill==='function') updateWHSourcePill();
 }
