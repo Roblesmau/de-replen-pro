@@ -218,17 +218,58 @@
     .filter-multi { height:160px; }
   }
 
-  /* Sticky first 2 columns on the SKU detail table — keeps Brand/Type
+  /* Sticky first 3 columns on the SKU detail table — keeps WH/Brand/Type
      anchored while horizontally scrolling through store columns. */
   #storeInvTable th:nth-child(1), #storeInvTable td:nth-child(1) {
     position:sticky; left:0; background:var(--surface); z-index:2;
   }
   #storeInvTable th:nth-child(2), #storeInvTable td:nth-child(2) {
-    position:sticky; left:120px; background:var(--surface); z-index:2;
+    position:sticky; left:60px; background:var(--surface); z-index:2;
   }
-  #storeInvTable thead th:nth-child(1), #storeInvTable thead th:nth-child(2) {
-    z-index:3; background:var(--surface-2);
+  #storeInvTable th:nth-child(3), #storeInvTable td:nth-child(3) {
+    position:sticky; left:180px; background:var(--surface); z-index:2;
   }
+  #storeInvTable thead th:nth-child(1),
+  #storeInvTable thead th:nth-child(2),
+  #storeInvTable thead th:nth-child(3) {
+    z-index:5; background:var(--surface-2);
+  }
+
+  /* Container-scoped sticky headers for all tables in Inventory, Capacity,
+     and Store Selection. Each wrapper scrolls internally (max-height 75vh)
+     so the table header (and an optional TOTAL row) stay pinned regardless
+     of how the user scrolls. */
+  .table-scroll {
+    overflow:auto;
+    max-height:75vh;
+    position:relative;
+    border-radius:var(--radius);
+  }
+  .table-scroll thead th {
+    position:sticky;
+    top:0;
+    background:var(--surface-2);
+    z-index:4;
+    box-shadow:0 1px 0 var(--border2);
+  }
+  /* Optional second sticky row under the header (TOTAL row in SKU detail) */
+  .table-scroll tbody tr.sticky-total td {
+    position:sticky;
+    top:34px;
+    background:var(--surface);
+    z-index:3;
+    font-weight:700;
+    border-bottom:2px solid var(--border2);
+    box-shadow:0 1px 0 var(--border2);
+  }
+  /* When sticky LEFT + sticky TOP intersect, the corner cells need the
+     highest z-index so they don't disappear behind scrolling content. */
+  .table-scroll thead th:nth-child(1),
+  .table-scroll thead th:nth-child(2),
+  .table-scroll thead th:nth-child(3) { z-index:6; }
+  .table-scroll tbody tr.sticky-total td:nth-child(1),
+  .table-scroll tbody tr.sticky-total td:nth-child(2),
+  .table-scroll tbody tr.sticky-total td:nth-child(3) { z-index:5; }
 
   /* Grid */
   .row { display:grid; gap:14px; }
@@ -328,7 +369,11 @@
   .log-box { background:var(--bg); border-radius:var(--radius); padding:12px; font-size:11px; font-family:monospace; max-height:160px; overflow-y:auto; line-height:1.8; white-space:pre-wrap; color:var(--muted); margin-top:10px; border:1px solid var(--border); }
 
   /* Capacity grid */
-  .cap-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius-lg); }
+  .cap-wrap { overflow:auto; max-height:75vh; border:1px solid var(--border); border-radius:var(--radius-lg); position:relative; }
+  /* Capacity matrix already sticks its own header (.cap-table th) via z-index:7
+     — boost that here so it stays above scrolling body rows when the wrapper scrolls. */
+  .cap-table thead th { position:sticky; top:0; z-index:6; }
+  .cap-table thead th.frozen { z-index:8; }
   .cap-table { border-collapse:collapse; min-width:100%; font-size:11px; }
   .cap-table th { font-size:10px; font-weight:600; color:#fff; padding:7px 9px; text-align:center; border-bottom:1px solid rgba(255,255,255,.15); background:#1A3A5C; white-space:nowrap; }
   .cap-table th.frozen { position:sticky; left:0; top:0; z-index:7; text-align:left; background:#243B55; }
@@ -547,7 +592,7 @@
         <button class="btn btn-secondary btn-sm" onclick="exportImpactReport()" title="Download as Excel">⬇ Export</button>
       </div>
     </div>
-    <div id="impactBody" style="overflow-x:auto;max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)"></div>
+    <div id="impactBody" class="table-scroll" style="border:1px solid var(--border)"></div>
   </div>
 
   <!-- Recommendations (inline) -->
@@ -706,7 +751,7 @@
         <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:10px;height:10px;border-radius:2px;background:var(--blue)"></span>&gt;90</span>
       </span>
     </div>
-    <div style="overflow-x:auto">
+    <div class="table-scroll">
       <table id="invTotalsTable">
         <thead id="invTotalsHead"></thead>
         <tbody id="invTotalsBody"></tbody>
@@ -717,7 +762,7 @@
 
   <div class="card">
     <div class="card-title">SKU detail — selected stores</div>
-    <div style="overflow-x:auto">
+    <div class="table-scroll">
       <table id="storeInvTable"><thead><tr><th>Store</th><th>SKU</th><th>Brand</th><th>Type</th><th>Store Qty</th><th>Capacity</th><th>Fill %</th></tr></thead>
       <tbody id="storeInvBody"></tbody></table>
     </div>
@@ -1896,7 +1941,7 @@ function runRun(){
     else {
       bdEl.innerHTML=`
         <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px">Per-store allocation (${prioLabel} priority)</div>
-        <div style="overflow-x:auto"><table>
+        <div class="table-scroll"><table>
           <thead><tr><th style="width:40px">#</th><th>Store</th><th style="text-align:right">Lines</th><th style="text-align:right">Units</th><th style="text-align:right">% of total</th></tr></thead>
           <tbody>${orderedIds.map((sid,i)=>{
             const sd=byStore[sid];
@@ -2621,24 +2666,58 @@ function renderInv(){
   const selStoresCols=STORES.filter(st=>sel.includes(st.id)&&(!invStoreFilter.length||invStoreFilter.includes(st.id)));
   const storeHeaders=selStoresCols.map(st=>`<th style="text-align:center;white-space:nowrap;font-size:10px">${st.short}</th>`).join('');
   const pyHeaders=`<th style="text-align:right">PY 120d</th><th style="text-align:right">Trend %</th><th style="text-align:right">${fcLabel} 30d</th><th style="text-align:right">${fcLabel} 90d</th>`;
-  const thead=`<tr><th>Brand</th><th>Type</th><th style="text-align:right">On Hand</th><th style="text-align:right">Capacity</th><th style="text-align:center">Fill %</th><th style="text-align:right">90d Sales</th>${pyHeaders}${storeHeaders}</tr>`;
+  // WH column added as the first column — leftmost, sticky alongside Brand/Type
+  const thead=`<tr><th style="text-align:right" title="Warehouse quantity available for this brand+type">WH</th><th>Brand</th><th>Type</th><th style="text-align:right">On Hand</th><th style="text-align:right">Capacity</th><th style="text-align:center">Fill %</th><th style="text-align:right">90d Sales</th>${pyHeaders}${storeHeaders}</tr>`;
   const tblHead=document.querySelector('#storeInvTable thead');
   if(tblHead) tblHead.innerHTML=thead;
 
+  // ── Build the TOTAL row first (sticks under the header) ────────────────
+  let totWH=0,totOH=0,totCap=0,totVel=0,totPY=0;
+  const totByStore={};
+  aggRows.forEach(r=>{
+    totWH+=(r.whQty||0);
+    totOH+=r.onHand;
+    totCap+=r.cap;
+    totVel+=r.vel90;
+    totPY+=r.py120;
+    Object.entries(r.byStore||{}).forEach(([sid,n])=>{ totByStore[sid]=(totByStore[sid]||0)+n; });
+  });
+  const totPct=totCap>0?Math.round(totOH/totCap*100):0;
+  const totCol=totPct<30?'var(--red)':totPct<60?'var(--amber)':totPct<90?'var(--green)':'var(--blue)';
+  const totTr=trendPct(totVel,totPY);
+  const totFc=getForecast(totVel,totTr,totPY);
+  const totStoreCells=selStoresCols.map(st=>{const v=totByStore[st.id]||0;return`<td class="mono" style="text-align:center;font-size:11px">${v.toLocaleString()}</td>`;}).join('');
+  const totalRowHtml=`<tr class="sticky-total">
+    <td class="mono" style="text-align:right">${Math.round(totWH).toLocaleString()}</td>
+    <td>TOTAL</td>
+    <td style="color:var(--hint);font-size:11px">all</td>
+    <td style="text-align:right">${totOH.toLocaleString()}</td>
+    <td style="text-align:right;color:var(--muted)">${totCap.toLocaleString()}</td>
+    <td style="text-align:center"><span style="color:${totCol}">${totPct}%</span></td>
+    <td style="text-align:right;color:var(--blue)">${totVel.toLocaleString()}</td>
+    <td style="text-align:right;color:var(--muted)">${hasPY?totPY.toLocaleString():'—'}</td>
+    <td style="text-align:right;color:${totTr===null?'var(--muted)':totTr>0?'var(--green)':totTr<0?'var(--red)':'var(--muted)'}">${totTr===null?'—':`<span aria-hidden="true" style="user-select:none;margin-right:2px">${totTr>0?'▲':totTr<0?'▼':''}</span>${totTr>0?'+':''}${totTr}%`}</td>
+    <td style="text-align:right;color:var(--blue)">${fmt30(totFc)}</td>
+    <td style="text-align:right;color:var(--blue)">${fmt90(totFc)}</td>
+    ${totStoreCells}
+  </tr>`;
+
   let lastBrand='';
-  document.getElementById('storeInvBody').innerHTML=aggRows.map(r=>{
+  const dataRowsHtml=aggRows.map(r=>{
     const pct=r.cap>0?Math.round(r.onHand/r.cap*100):0;
     const col=pct<30?'var(--red)':pct<60?'var(--amber)':pct<90?'var(--green)':'var(--blue)';
     const tr=trendPct(r.vel90,r.py120);
     const fc=getForecast(r.vel90,tr,r.py120);
+    const whCell=`<td class="mono" style="text-align:right;color:${(r.whQty||0)>0?'var(--green)':'var(--hint)'}">${(r.whQty||0)>0?Math.round(r.whQty).toLocaleString():'—'}</td>`;
     const brandCell=r.brand!==lastBrand
       ?`<td style="font-weight:600;font-size:12px">${hesc(r.brand)}</td>`
       :`<td style="color:var(--hint);font-size:11px;padding-left:14px">└─</td>`;
     lastBrand=r.brand;
     const storeCells=selStoresCols.map(st=>{const v=r.byStore[st.id]||0;return`<td class="mono" style="text-align:center;font-size:11px;color:${v>0?'var(--green)':v<0?'var(--red)':'var(--hint)'}">${v||'—'}</td>`;}).join('');
     const pyCells=`<td style="text-align:right;color:var(--muted)">${hasPY?r.py120.toLocaleString():'—'}</td><td style="text-align:right;font-weight:600;color:${tr===null?'var(--muted)':tr>0?'var(--green)':tr<0?'var(--red)':'var(--muted)'}">${tr===null?'—':`<span aria-hidden="true" style="user-select:none;margin-right:2px">${tr>0?'▲':tr<0?'▼':''}</span>${tr>0?'+':''}${tr}%`}</td><td style="text-align:right;color:var(--blue)">${fmt30(fc)}</td><td style="text-align:right;color:var(--blue)">${fmt90(fc)}</td>`;
-    return`<tr>${brandCell}<td style="font-size:11px;color:var(--muted)">${hesc(r.type)}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td>${pyCells}${storeCells}</tr>`;
+    return`<tr>${whCell}${brandCell}<td style="font-size:11px;color:var(--muted)">${hesc(r.type)}</td><td style="text-align:right;font-weight:600">${r.onHand.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${r.cap.toLocaleString()}</td><td style="text-align:center"><span style="font-weight:600;color:${col}">${pct}%</span><div style="height:3px;border-radius:2px;background:var(--border);margin-top:2px;min-width:40px"><div style="width:${Math.min(pct,100)}%;height:100%;border-radius:2px;background:${col}"></div></div></td><td style="text-align:right;color:var(--blue)">${r.vel90.toLocaleString()}</td>${pyCells}${storeCells}</tr>`;
   }).join('');
+  document.getElementById('storeInvBody').innerHTML=totalRowHtml+dataRowsHtml;
 }
 function getFilterValues(id){
   const el=document.getElementById(id);
@@ -3176,7 +3255,7 @@ function renderNAVPreview(prefix=''){
   navPrev.innerHTML=`
     <div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;overflow:hidden;box-shadow:var(--shadow-sm)">
       <div style="background:var(--navy);color:#fff;padding:8px 14px;font-size:12px;font-weight:600">${navLoc} · ${r.length} lines · ${r.reduce((a,b)=>a+b.transferQty,0)} units · ${new Date().toLocaleDateString()}</div>
-      <div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;min-width:100%;color:var(--text)">
+      <div class="table-scroll"><table style="font-size:11px;border-collapse:collapse;min-width:100%;color:var(--text)">
         <thead><tr style="background:var(--navy);color:#fff">${['ITEM','No. (SKU)','Action Message','Accept','Description','Location Code','Original QTY','QTY','Brand','Type','Signal'].map((h,i)=>`<th style="padding:6px 9px;font-weight:500;border:1px solid rgba(255,255,255,0.15);${i>=8?'background:rgba(255,255,255,0.08)':''}">${h}</th>`).join('')}</tr></thead>
         <tbody>${r.map((x,i)=>`<tr style="background:${i%2?'var(--surface-2)':'var(--surface)'}">
           <td style="padding:5px 9px;border:1px solid var(--border)">Item</td>
