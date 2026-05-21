@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="Replen Pro — Designer Eyes">
+  <title>Replen Pro — Designer Eyes</title>
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0B0F1A"/>
+      <stop offset="1" stop-color="#1E3A8A"/>
+    </linearGradient>
+    <linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#1E40AF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bgGrad)"/>
+  <!-- subtle grid pattern -->
+  <g opacity="0.06" stroke="#FFFFFF" stroke-width="1">
+    <line x1="0" y1="120" x2="1200" y2="120"/>
+    <line x1="0" y1="240" x2="1200" y2="240"/>
+    <line x1="0" y1="360" x2="1200" y2="360"/>
+    <line x1="0" y1="480" x2="1200" y2="480"/>
+    <line x1="200" y1="0" x2="200" y2="630"/>
+    <line x1="500" y1="0" x2="500" y2="630"/>
+    <line x1="800" y1="0" x2="800" y2="630"/>
+    <line x1="1000" y1="0" x2="1000" y2="630"/>
+  </g>
+  <!-- Logo -->
+  <g transform="translate(96, 195)">
+    <rect width="240" height="240" rx="52" fill="url(#logoGrad)"/>
+    <text x="120" y="135" text-anchor="middle" dominant-baseline="middle"
+          font-family="Inter, -apple-system, system-ui, sans-serif"
+          font-size="140" font-weight="800" letter-spacing="-4" fill="#FFFFFF">R<tspan fill="#F59E0B">P</tspan></text>
+  </g>
+  <!-- Wordmark + tagline -->
+  <g transform="translate(396, 252)">
+    <text x="0" y="0" font-family="Inter, -apple-system, system-ui, sans-serif"
+          font-size="78" font-weight="700" letter-spacing="-2" fill="#FFFFFF">Replen Pro</text>
+    <text x="0" y="56" font-family="Inter, sans-serif" font-size="30" font-weight="500" fill="#94A3B8">Designer Eyes · replenishment engine</text>
+    <text x="0" y="118" font-family="JetBrains Mono, ui-monospace, monospace" font-size="22" font-weight="500" fill="#64748B">Shopify POS  →  NAV transfer orders</text>
+  </g>
+</svg>

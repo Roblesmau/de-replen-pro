@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Replen Pro">
+  <title>Replen Pro</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1E40AF"/>
+      <stop offset="1" stop-color="#1E3A8A"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <text x="50%" y="58%" text-anchor="middle" dominant-baseline="middle"
+        font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif"
+        font-size="148" font-weight="800" letter-spacing="-4" fill="#FFFFFF">R<tspan fill="#F59E0B">P</tspan></text>
+</svg>

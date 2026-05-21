@@ -1,4 +1,11 @@
-# Designer Eyes — Replenishment Engine
+<p align="center">
+  <img src="./logo.svg" alt="Replen Pro" width="120" height="120">
+</p>
+
+<h1 align="center">Replen Pro</h1>
+<p align="center"><em>Designer Eyes — replenishment engine · Shopify POS → NAV transfer orders</em></p>
+
+---
 
 Single-file HTML replenishment tool for Designer Eyes eyewear retail.
 Connects to Shopify POS via a Vercel proxy and generates NAV transfer orders.
