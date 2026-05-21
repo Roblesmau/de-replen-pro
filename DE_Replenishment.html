@@ -956,19 +956,22 @@
     <!-- WH upload settings (column mapping + Location/Zone filter) -->
     <div id="whSettingsPanel" style="display:none;margin-top:14px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">WH upload settings &mdash; column mapping + zone filter</span>
+        <span id="whSettingsTitle" style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">WH upload settings &mdash; column mapping + zone filter</span>
         <button onclick="resetWHFilterDefaults()" class="btn btn-secondary btn-sm" title="Restore defaults: Location=DE-MAIN · Zones=GOLDEN, ZONE A, ZONE B, ZONE C">&#8634; Defaults (DE-MAIN / A,B,C,GOLDEN)</button>
       </div>
-      <div style="margin-bottom:12px;padding:8px 12px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:var(--radius);font-size:11px;line-height:1.4">
-        <strong>Column mapping</strong> applies only to <strong>Step 3A (Excel upload)</strong>. <strong>Location &amp; Zone filters</strong> apply to <strong>both Step 3A and Step 3B (Supabase live)</strong>.
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
-        <div class="field"><label>Sheet</label><select id="whColSheet" onchange="onWHSettingChange()"><option value="">(auto-detect)</option></select></div>
-        <div class="field"><label>SKU column (Item No)</label><select id="whColSku" onchange="onWHSettingChange()"></select></div>
-        <div class="field"><label>Bin Code column</label><select id="whColBin" onchange="onWHSettingChange()"></select></div>
-        <div class="field"><label>Quantity column</label><select id="whColQty" onchange="onWHSettingChange()"></select></div>
-        <div class="field"><label>Location Code column</label><select id="whColLoc" onchange="onWHSettingChange()"></select></div>
-        <div class="field"><label>Zone Code column</label><select id="whColZone" onchange="onWHSettingChange()"></select></div>
+      <!-- Column mapping section (Step 3A only) — hidden when 3B is the active source -->
+      <div id="whColMappingSection">
+        <div style="margin-bottom:12px;padding:8px 12px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:var(--radius);font-size:11px;line-height:1.4">
+          <strong>Column mapping</strong> applies only to <strong>Step 3A (Excel upload)</strong>. <strong>Location &amp; Zone filters</strong> below apply to <strong>both Step 3A and Step 3B</strong>.
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+          <div class="field"><label>Sheet</label><select id="whColSheet" onchange="onWHSettingChange()"><option value="">(auto-detect)</option></select></div>
+          <div class="field"><label>SKU column (Item No)</label><select id="whColSku" onchange="onWHSettingChange()"></select></div>
+          <div class="field"><label>Bin Code column</label><select id="whColBin" onchange="onWHSettingChange()"></select></div>
+          <div class="field"><label>Quantity column</label><select id="whColQty" onchange="onWHSettingChange()"></select></div>
+          <div class="field"><label>Location Code column</label><select id="whColLoc" onchange="onWHSettingChange()"></select></div>
+          <div class="field"><label>Zone Code column</label><select id="whColZone" onchange="onWHSettingChange()"></select></div>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
         <div style="display:flex;flex-direction:column;gap:6px">
@@ -2881,6 +2884,9 @@ function onWHFilterChange(){
   }
 }
 function renderWHSettings(){
+  // Sync the column-mapping visibility with the current source — runs every time
+  // the panel is opened so the right sections are visible immediately.
+  if(typeof updateWHSourcePill==='function') updateWHSourcePill();
   // Populate column-mapper dropdowns from S.whAllColumns (discovered on last upload)
   const cols=S.whAllColumns||[];
   const sheets=S.whAllSheets||[];
@@ -3858,6 +3864,15 @@ function updateWHSourcePill(){
   const colB=document.getElementById('step3bCol');
   if(colA) colA.style.opacity=isSb?'0.55':'1';
   if(colB) colB.style.opacity=isSb?'1':'0.55';
+  // Hide the column-mapping section when 3B (Supabase) is active — that section only
+  // applies to Excel uploads (3A). Filters below it still apply to both sources.
+  const mapSec=document.getElementById('whColMappingSection');
+  if(mapSec) mapSec.style.display=isSb?'none':'';
+  // Adapt the settings panel title to match the visible content
+  const setTitle=document.getElementById('whSettingsTitle');
+  if(setTitle) setTitle.textContent=isSb
+    ? 'WH upload settings — zone filter'
+    : 'WH upload settings — column mapping + zone filter';
 }
 async function selectWHSource(target){
   // Idempotent: clicking the already-active segment manually refreshes that source.
