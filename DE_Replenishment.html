@@ -3943,12 +3943,23 @@ async function setWHSource(target,opts){
 // Auto-refresh trigger: called at the end of Step 2B (Shopify live data load).
 // Refreshes inventory_available only if Supabase is the active WH source.
 function refreshWHAfterStep2B(){
-  if(S.whSource!=='supabase') return;
-  if(typeof pullFromInventoryAvailable==='function'){
-    pullFromInventoryAvailable(false).catch(()=>{});
-  }
-  if(typeof refreshInvAvailOverview==='function'){
-    refreshInvAvailOverview(false).catch(()=>{});
+  if(S.whSource==='supabase'){
+    // 3B path: pull live availability from inventory_available
+    if(typeof pullFromInventoryAvailable==='function'){
+      pullFromInventoryAvailable(false).catch(()=>{});
+    }
+    if(typeof refreshInvAvailOverview==='function'){
+      refreshInvAvailOverview(false).catch(()=>{});
+    }
+  } else {
+    // 3A path: auto-pull the last uploaded file's cloud copy from de_wh_bins
+    // (same handler that the "⚡ Load from cloud" button under Step 3A calls)
+    if(typeof pullWHFromSupabase==='function'){
+      pullWHFromSupabase(false).catch(()=>{});
+    }
+    if(typeof refreshWHUploadOverview==='function'){
+      refreshWHUploadOverview(false).catch(()=>{});
+    }
   }
 }
 
