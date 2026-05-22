@@ -3109,7 +3109,12 @@ function processWHRows(rows){
     });
     bumpWhVersion();
 
-    // Update whQty in DATA rows
+    // Reset every DATA row's whQty FIRST so SKUs that fell out of the new S.wh
+    // (e.g. a narrower filter or different source) don't keep stale values from a
+    // previous load. Without this, switching the Allowed Locations filter from
+    // "all" to "DE-MAIN" would leave the BIN-ECAMZ/BIN-VIN SKUs' whQty populated.
+    DATA.forEach(d=>{ d.whQty=0; });
+    // Now apply the fresh values from the new S.wh
     S.wh.forEach(w=>{
       DATA.filter(d=>normSku(d.sku).toLowerCase()===w.sku).forEach(d=>{d.whQty=w.whQty;});
     });
