@@ -857,20 +857,20 @@
       <div class="field"><label>Supabase URL</label><input type="text" id="sbUrl" placeholder="https://xxxx.supabase.co"></div>
       <div class="field"><label>Supabase anon key</label><input type="password" id="sbKey" placeholder="eyJ..."></div>
     </div>
-    <!-- WH source segmented toggle — pick which Step 3 path runs after Step 2B -->
+    <!-- WH source segmented toggle — pick which Step 4 path runs after Step 3 -->
     <div id="whSourceWrap" style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div style="display:flex;flex-direction:column;gap:2px">
         <span style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">WH source</span>
-        <span style="font-size:10px;color:var(--hint)">Runs after Step 2B finishes</span>
+        <span style="font-size:10px;color:var(--hint)">Runs after Step 3 finishes</span>
       </div>
       <div role="radiogroup" aria-label="WH source" class="wh-source-toggle">
         <button id="whSrcBtnUpload" type="button" role="radio" aria-checked="false" onclick="selectWHSource('upload')" class="wh-src-seg">
-          <span class="wh-src-num">3A</span>
+          <span class="wh-src-num">4A</span>
           <span class="wh-src-name">Excel upload</span>
           <span class="wh-src-sub" id="whSrcSubUpload">no file loaded</span>
         </button>
         <button id="whSrcBtnSupabase" type="button" role="radio" aria-checked="false" onclick="selectWHSource('supabase')" class="wh-src-seg">
-          <span class="wh-src-num">3B</span>
+          <span class="wh-src-num">4B</span>
           <span class="wh-src-name">Supabase live</span>
           <span class="wh-src-sub" id="whSrcSubSupabase">not loaded</span>
         </button>
@@ -886,9 +886,9 @@
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
 
-      <!-- Step 2A: Product Catalog (choose one) -->
+      <!-- Step 2: Product Catalog (choose one) -->
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 2A &mdash; Catalog</span>
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 2 &mdash; Catalog</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
           <button id="btnCache" class="btn btn-green btn-sm" onclick="loadCatalogFromCache()" title="Read product catalog from Supabase &mdash; fast, then auto-loads live data" disabled style="opacity:.4;cursor:not-allowed">&#9889; Load from cloud</button>
           <span id="cacheLastSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud…</span>
@@ -898,9 +898,9 @@
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
 
-      <!-- Step 2B: Live Data (auto) -->
+      <!-- Step 3: Live Data (auto) -->
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 2B &mdash; Live Data</span>
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3 &mdash; Live Data</span>
         <div id="btn2B" style="font-size:11px;color:var(--muted);padding:5px 11px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);white-space:nowrap;text-align:center;line-height:1.5">
           Auto: Locations<br>Inventory &middot; Orders &middot; Prior Year
         </div>
@@ -908,9 +908,9 @@
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
 
-      <!-- Step 3A: Upload Bin Contents (Excel) -->
+      <!-- Step 4A: Upload Bin Contents (Excel) -->
       <div id="step3aCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3A &mdash; Upload</span>
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 4A &mdash; Upload</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
           <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch the last uploaded NAV file from Supabase (de_wh_bins)">&#9889; Load from cloud</button>
           <span id="whCloudSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud&hellip;</span>
@@ -924,21 +924,21 @@
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
 
-      <!-- Step 3B: Load from Supabase inventory_available -->
+      <!-- Step 4B: Load from Supabase inventory_available -->
       <div id="step3bCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 3B &mdash; Supabase</span>
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 4B &mdash; Supabase</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
-          <button id="btnWHInvAvail" class="btn btn-green btn-sm" onclick="onClickStep3B()" title="Read live availability from inventory_available. Auto-refreshes after every Step 2B (Shopify live load).">&#9729; Load from Supabase</button>
+          <button id="btnWHInvAvail" class="btn btn-green btn-sm" onclick="onClickStep3B()" title="Read live availability from inventory_available. Auto-refreshes after every Step 3 (Shopify live load).">&#9729; Load from Supabase</button>
           <span id="whInvAvailSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Not loaded</span>
-          <span style="font-size:10px;color:var(--hint);line-height:1.3">Auto-refreshes after Step 2B</span>
+          <span style="font-size:10px;color:var(--hint);line-height:1.3">Auto-refreshes after Step 3</span>
         </div>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
 
-      <!-- Step 4: Inspect -->
+      <!-- Step 5: Inspect -->
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 4</span>
+        <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 5</span>
         <button id="btnInspect" class="btn btn-secondary btn-sm" onclick="showTab('connect');document.getElementById('rawInspector').scrollIntoView({behavior:'smooth'});renderInspector()" disabled style="opacity:.4;cursor:not-allowed">&#128269; Inspect data</button>
       </div>
 
@@ -977,7 +977,7 @@
       <!-- Column mapping section (Step 3A only) — hidden when 3B is the active source -->
       <div id="whColMappingSection">
         <div style="margin-bottom:12px;padding:8px 12px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue);border-radius:var(--radius);font-size:11px;line-height:1.4">
-          <strong>Column mapping</strong> applies only to <strong>Step 3A (Excel upload)</strong>. <strong>Location &amp; Zone filters</strong> below apply to <strong>both Step 3A and Step 3B</strong>.
+          <strong>Column mapping</strong> applies only to <strong>Step 4A (Excel upload)</strong>. <strong>Location &amp; Zone filters</strong> below apply to <strong>both Step 4A and Step 4B</strong>.
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
           <div class="field"><label>Sheet</label><select id="whColSheet" onchange="onWHSettingChange()"><option value="">(auto-detect)</option></select></div>
@@ -3623,7 +3623,7 @@ function showOrphanedCapacity(){
   const inCatalog=Object.values(S.raw?.itemMap||{}).some(v=>v.brand&&v.type);
   const reason=inCatalog
     ? 'These (brand, type) combos are in your capacity matrix but DO NOT exist in the live Shopify catalog. Likely causes: typo in Excel ("RAYBAN" vs "RAY-BAN"), case mismatch, trailing spaces, OR a brand/type that was discontinued in Shopify since the file was created.\n\nFix: re-export the matrix, correct the spelling in the Excel, then Clear all → Import.'
-    : 'Catalog isn\'t loaded — these combos look orphaned simply because Step 2A hasn\'t run yet. Load from cloud or do a Full Shopify load and they should appear.';
+    : 'Catalog isn\'t loaded — these combos look orphaned simply because Step 2 hasn\'t run yet. Load from cloud or do a Full Shopify load and they should appear.';
   alert('Orphaned combos: '+orphans.length+'\n\n'+reason+'\n\nList:\n\n'+lines.join('\n'));
 }
 function onCapChange(input){
@@ -4587,12 +4587,14 @@ function clog(m){const el=document.getElementById('connLog');el.textContent+='\n
 function setStep(step, status){
   const colors={ok:'var(--green-bg)',err:'var(--red-bg)',loading:'var(--blue-bg)'};
   const textColors={ok:'var(--green)',err:'var(--red)',loading:'var(--blue)'};
+  // Internal keys (1, '2a', '2b', 3, 4) unchanged for stability;
+  // the user-visible prefix has shifted: 2a→2, 2b→3, 3→4, 4→5.
   const labels={
     1:   {ok:'1 · Connected ✓',        err:'1 · Connection failed',   loading:'1 · Connecting...'},
-    '2a':{ok:'2A · Catalog ready ✓',   err:'2A · Catalog failed',     loading:'2A · Loading catalog...'},
-    '2b':{ok:'2B · Live data ready ✓', err:'2B · Live data failed',   loading:'2B · Loading live data...'},
-    3:   {ok:'3 · WH stock loaded ✓',  err:'3 · WH load failed',      loading:'3 · Uploading...'},
-    4:   {ok:'4 · Ready to run',            err:'',                            loading:''},
+    '2a':{ok:'2 · Catalog ready ✓',    err:'2 · Catalog failed',      loading:'2 · Loading catalog...'},
+    '2b':{ok:'3 · Live data ready ✓',  err:'3 · Live data failed',    loading:'3 · Loading live data...'},
+    3:   {ok:'4 · WH stock loaded ✓',  err:'4 · WH load failed',      loading:'4 · Uploading...'},
+    4:   {ok:'5 · Ready to run',            err:'',                            loading:''},
   };
   const el=document.getElementById('st'+step);
   if(el){
@@ -4705,19 +4707,19 @@ async function syncCatalogToSupabase(itemMap){
 async function loadLiveData(itemMap){
   const s2bEl=document.getElementById('step2BStatus');
   const set2BMsg=(msg,err)=>{if(s2bEl){s2bEl.style.display='block';s2bEl.textContent=msg;if(err){s2bEl.style.background='var(--red-bg)';s2bEl.style.color='var(--red)';s2bEl.style.borderColor='#F09595';}else{s2bEl.style.background='var(--blue-bg)';s2bEl.style.color='var(--blue)';s2bEl.style.borderColor='#85B7EB';}}};
-  set2BMsg('\u23f3 Step 2B \u2014 Loading live data from Shopify...');
+  set2BMsg('\u23f3 Step 3 \u2014 Loading live data from Shopify...');
   setStep('2b','loading');
   clog('\n[2B] Live data from Shopify...');
   try{
     // 2B-1 Locations
-    set2BMsg('⏳ Step 2B — [1/3] Fetching locations...');
+    set2BMsg('⏳ Step 3 — [1/3] Fetching locations...');
     setProgress(56);clog('  [2B-1] Locations...');
     const locData=await shopifyFetch('/admin/api/2024-01/locations.json');
     const locs=locData.locations||[];S.raw.locations=locs;
     clog('  \u2713 '+locs.length+' locations');
 
     // 2B-2 Inventory by known item IDs
-    set2BMsg('⏳ Step 2B — [2/3] Fetching inventory (~2 min)...');
+    set2BMsg('⏳ Step 3 — [2/3] Fetching inventory (~2 min)...');
     setProgress(60);clog('  [2B-2] Inventory levels...');
     const EXCL=new Set(['35933356085','71277510830']);
     const retailLocs=locs.filter(l=>l.active
@@ -4742,7 +4744,7 @@ async function loadLiveData(itemMap){
       setProgress(pct);
       // Update visible status line every ~5% so connLog isn't spammed
       if(i%(invBatchSize*10)===0){
-        set2BMsg('⏳ Step 2B — [2/3] Inventory '+itemsDone.toLocaleString()+'/'+allItemIds.length.toLocaleString()+' items · '+allInv.length.toLocaleString()+' records');
+        set2BMsg('⏳ Step 3 — [2/3] Inventory '+itemsDone.toLocaleString()+'/'+allItemIds.length.toLocaleString()+' items · '+allInv.length.toLocaleString()+' records');
       }
       if(i%2500===0&&i>0) clog('  [INV] '+itemsDone+'/'+allItemIds.length+' items fetched → '+allInv.length+' records');
     }
@@ -4752,7 +4754,7 @@ async function loadLiveData(itemMap){
     clog('  \u2713 '+allInv.length+' inventory records ('+allInv.filter(r=>r.available>0).length+' with stock)');
 
     // 2B-3 Orders 90d + Prior Year in parallel
-    set2BMsg('⏳ Step 2B — [3/3] Fetching orders + prior year...');
+    set2BMsg('⏳ Step 3 — [3/3] Fetching orders + prior year...');
     setProgress(82);clog('  [2B-3] Orders 90d + Prior Year (parallel)...');
     const ago90=new Date(Date.now()-90*864e5).toISOString();
     const pyStart=new Date(Date.now()-365*864e5-90*864e5).toISOString();
@@ -4822,15 +4824,15 @@ async function loadLiveData(itemMap){
     renderSchema();renderInspector();
     if(s2bEl) s2bEl.style.display='none';
     clog('\n\u2713 All live data loaded. Prior year: '+pyStart.slice(0,10)+' \u2192 '+pyEnd.slice(0,10));
-    clog('\u2192 Next: upload Bin Contents (Step 3)');
+    clog('\u2192 Next: upload Bin Contents (Step 4)');
     // Step 3B auto-refresh: if Supabase is the active WH source, pull fresh
     // availability now that DATA is rebuilt. Fire-and-forget; failure-tolerant.
     if(typeof refreshWHAfterStep2B==='function') refreshWHAfterStep2B();
   }catch(e){
-    clog('\u2717 Step 2B failed: '+e.message);console.error(e);
+    clog('\u2717 Step 3 failed: '+e.message);console.error(e);
     setStep('2b','err');
     setConnStatus('\u2717 Live data failed: '+e.message,'s-err');
-    set2BMsg('\u2717 Step 2B failed: '+e.message,true);
+    set2BMsg('\u2717 Step 3 failed: '+e.message,true);
     setProgress(100);
   }
 }
@@ -5097,7 +5099,7 @@ async function loadAllData(){return loadCatalogFromShopify();}
 
 
 async function loadPriorYearOrders(){
-  clog('Prior year orders are now loaded automatically in Step 2B.');
+  clog('Prior year orders are now loaded automatically in Step 3.');
 }
 
 
@@ -5566,7 +5568,7 @@ function renderInspector(){
     const unmatchedUnits=wh.filter(r=>!r.matched).reduce((a,b)=>a+b.whQty,0);
     const matchedUnits=totalUnits-unmatchedUnits;
     if(statsEl) statsEl.innerHTML='<strong>'+wh.length.toLocaleString()+'</strong> SKUs · <strong style="color:var(--green)">'+matched.toLocaleString()+'</strong> matched · <strong style="color:var(--red)">'+unmatched.toLocaleString()+'</strong> not matched · <strong>'+totalUnits.toLocaleString()+'</strong> total units · <strong style="color:var(--red)">'+unmatchedUnits.toLocaleString()+'</strong> units not matched · showing first '+Math.min(nRows,wh.length);
-    if(!wh.length){document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Upload WH Bin Contents first (Step 3).</div>';return;}
+    if(!wh.length){document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Upload WH Bin Contents first (Step 4).</div>';return;}
     const shown=wh.slice(0,nRows);
     const cols=['sku','whQty','brand','type','name','matched'];
     const labels={sku:'Variant SKU',whQty:'WH Qty',brand:'Brand',type:'Type',name:'Description',matched:'Matched'};
