@@ -1028,6 +1028,7 @@
           <option value="orders">Orders 90d</option>
           <option value="ordersPY">Orders Prior Year</option>
           <option value="wh" id="inspectorOptWH" style="display:none">WH Bin Contents</option>
+          <option value="wh_unmatched" id="inspectorOptWHUnmatched" style="display:none">⚠ WH SKUs without Shopify match</option>
           <option value="unknown_skus">⚠ Warnings — Unknown SKUs</option>
         </select>
         <select id="inspectorRows" onchange="renderInspector()" style="width:auto;font-size:11px">
@@ -3151,6 +3152,11 @@ function processWHRows(rows){
     // Show WH option in inspector + show Clear button
     const optWH=document.getElementById('inspectorOptWH');
     if(optWH) optWH.style.display='';
+    // Show the "unmatched" report option only when there's at least 1 WH SKU that
+    // didn't pair to S.raw.itemMap — otherwise hide to keep the dropdown clean.
+    const unmatchedCount=S.wh.filter(r=>!r.matched).length;
+    const optWHUnm=document.getElementById('inspectorOptWHUnmatched');
+    if(optWHUnm) optWHUnm.style.display=unmatchedCount>0?'':'none';
     const bClr=document.getElementById('btnClearWH');
     if(bClr) bClr.style.display='inline-block';
     // Refresh all UI panels with updated whQty
@@ -3192,14 +3198,16 @@ function clearWHContents(){
     bwh.style.cssText='cursor:pointer;opacity:1;pointer-events:auto';
     bwh.innerHTML='&#127981; Upload Bin Contents<input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">';
   }
-  // Hide Clear button + WH option in inspector dropdown
+  // Hide Clear button + WH option(s) in inspector dropdown
   const bClr=document.getElementById('btnClearWH');
   if(bClr) bClr.style.display='none';
   const optWH=document.getElementById('inspectorOptWH');
   if(optWH) optWH.style.display='none';
-  // If inspector was currently viewing WH, switch back to unified
+  const optWHUnm=document.getElementById('inspectorOptWHUnmatched');
+  if(optWHUnm) optWHUnm.style.display='none';
+  // If inspector was currently viewing a WH report, switch back to unified
   const sel=document.getElementById('inspectorTable');
-  if(sel && sel.value==='wh') sel.value='unified';
+  if(sel && (sel.value==='wh'||sel.value==='wh_unmatched')) sel.value='unified';
   // Refresh dependent UI
   if(typeof renderStoreGrid==='function') renderStoreGrid();
   if(typeof populateInvFilters==='function') populateInvFilters();
@@ -5578,6 +5586,51 @@ function renderInspector(){
     document.getElementById('inspectorTableWrap').innerHTML=`<table><thead><tr>${cols.map(c=>`<th>${hesc(labels[c]||c)}</th>`).join('')}</tr></thead><tbody>${shown.map((r,i)=>`<tr style="${i%2?'background:var(--bg)':''}"><td style="font-family:monospace;font-size:11px">${hesc(r.sku)}</td><td style="text-align:center;font-weight:600;color:var(--blue)">${r.whQty}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${hesc(r.brand)||'—'}</td><td style="color:${r.matched?'var(--blue)':'var(--hint)'}">${hesc(r.type)||'—'}</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hesc(r.name)||'—'}</td><td style="text-align:center">${r.matched?'<span class="pill p-ok">✓</span>':'<span class="pill p-warn">⚠</span>'}</td></tr>`).join('')}</tbody></table>`;
     return;
   }
+  if(table==='wh_unmatched'){
+    // WH SKUs (from Step 4A de_wh_bins OR Step 4B inventory_available) that did NOT
+    // pair to anything in S.raw.itemMap. These items will not be replenished because
+    // the engine can't resolve their brand/type. Typically caused by:
+    //   - SKU in WH but missing from Shopify catalog
+    //   - SKU typo / formatting mismatch (leading apostrophe, trailing whitespace)
+    //   - Product deleted from Shopify but still sitting in WH
+    const statsEl=document.getElementById('inspectorStats');
+    const wh=S.wh||[];
+    const unmatched=wh.filter(r=>!r.matched);
+    const unmatchedUnits=unmatched.reduce((a,b)=>a+(b.whQty||0),0);
+    const totalUnits=wh.reduce((a,b)=>a+(b.whQty||0),0);
+    const srcLbl=S.whSource==='supabase'?'Step 4B (inventory_available)':'Step 4A (de_wh_bins)';
+    if(statsEl) statsEl.innerHTML='Source: <strong>'+srcLbl+'</strong> · <strong style="color:var(--red)">'+unmatched.length.toLocaleString()+'</strong> WH SKUs without Shopify match · <strong style="color:var(--red)">'+unmatchedUnits.toLocaleString()+'</strong> units stranded · '+(totalUnits>0?Math.round(unmatchedUnits/totalUnits*100):0)+'% of WH inventory · showing first '+Math.min(nRows,unmatched.length);
+    if(!wh.length){
+      document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Load WH data first (Step 4A or 4B).</div>';
+      return;
+    }
+    if(!unmatched.length){
+      document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--green);font-size:12px">✓ All '+wh.length.toLocaleString()+' WH SKUs paired to the Shopify catalog. No stranded inventory.</div>';
+      return;
+    }
+    // Cross-reference raw bin/location info from S.whRaw when available
+    const rawBySku={};
+    (S.whRaw||[]).forEach(r=>{
+      const k=normSku(r.item_no).toLowerCase();
+      if(!rawBySku[k]) rawBySku[k]=[];
+      rawBySku[k].push(r);
+    });
+    const shown=unmatched.slice(0,nRows);
+    document.getElementById('inspectorTableWrap').innerHTML=`<table><thead><tr><th>Variant SKU</th><th style="text-align:right">WH Qty</th><th>Bin Code(s)</th><th>Location</th><th>Zone</th><th>Likely cause</th></tr></thead><tbody>${shown.map((r,i)=>{
+      const raws=rawBySku[normSku(r.sku).toLowerCase()]||[];
+      const bins=[...new Set(raws.map(x=>x.bin_code).filter(Boolean))].join(', ')||'—';
+      const locs=[...new Set(raws.map(x=>x.location_code).filter(Boolean))].join(', ')||'—';
+      const zones=[...new Set(raws.map(x=>x.zone_code).filter(Boolean))].join(', ')||'—';
+      // Heuristic guess at the root cause
+      const skuStr=String(r.sku||'');
+      let cause='Not in Shopify catalog';
+      if(/^\s|\s$/.test(skuStr)) cause='Whitespace in SKU — clean WH file';
+      else if(/^'/.test(skuStr)) cause='Leading apostrophe — clean WH file';
+      else if(skuStr.length<3) cause='Suspiciously short SKU';
+      return `<tr style="${i%2?'background:var(--bg)':''}"><td class="mono" style="font-size:11px">${hesc(r.sku)}</td><td class="mono" style="text-align:right;font-weight:600;color:var(--blue)">${r.whQty.toLocaleString()}</td><td style="font-size:11px;color:var(--muted)">${hesc(bins)}</td><td style="font-size:11px;color:var(--muted)">${hesc(locs)}</td><td style="font-size:11px;color:var(--muted)">${hesc(zones)}</td><td style="font-size:11px;color:var(--amber)">${hesc(cause)}</td></tr>`;
+    }).join('')}</tbody></table>`;
+    return;
+  }
   if(table==='unknown_skus'){
     const map=S.raw.itemMap||{};
     const statsEl=document.getElementById('inspectorStats');
@@ -5821,11 +5874,38 @@ function exportRawTable(table){
 
 function downloadInspectorXLSX(){
   const table=document.getElementById('inspectorTable')?.value||'unified';
-  const dt=new Date().toISOString().slice(0,10);
-  // For unified and wh use dedicated exportRawTable paths
-  // For others, delegate to exportRawTable which already handles them
+  // For wh_unmatched build the export inline (small, derived from S.wh — no need
+  // to touch exportRawTable which is keyed on raw Shopify tables).
+  if(table==='wh_unmatched'){
+    const unmatched=(S.wh||[]).filter(r=>!r.matched);
+    const rawBySku={};
+    (S.whRaw||[]).forEach(r=>{
+      const k=normSku(r.item_no).toLowerCase();
+      if(!rawBySku[k]) rawBySku[k]=[];
+      rawBySku[k].push(r);
+    });
+    const wb=XLSX.utils.book_new();
+    const header=['Variant SKU','WH Qty','Bin Code(s)','Location Code(s)','Zone Code(s)'];
+    const rows=[header].concat(unmatched.map(r=>{
+      const raws=rawBySku[normSku(r.sku).toLowerCase()]||[];
+      return[
+        String(r.sku||''),
+        r.whQty||0,
+        [...new Set(raws.map(x=>x.bin_code).filter(Boolean))].join(', '),
+        [...new Set(raws.map(x=>x.location_code).filter(Boolean))].join(', '),
+        [...new Set(raws.map(x=>x.zone_code).filter(Boolean))].join(', '),
+      ];
+    }));
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    // Force the SKU column to text so Excel doesn't reformat as a number
+    for(let i=1;i<rows.length;i++){const ref='A'+(i+1);if(ws[ref]){ws[ref].t='s';ws[ref].v=String(ws[ref].v);}}
+    ws['!cols']=[{wch:22},{wch:8},{wch:24},{wch:18},{wch:14}];
+    XLSX.utils.book_append_sheet(wb,ws,'WH unmatched');
+    XLSX.writeFile(wb,'DE_WH_unmatched_'+new Date().toISOString().slice(0,10)+'.xlsx');
+    return;
+  }
   if(table==='unified'){
-    exportRawTable('unified'); // delegates to full unified export with all fields incl. prior year
+    exportRawTable('unified');
   } else if(table==='wh'){
     exportRawTable('wh');
   } else {
@@ -5835,7 +5915,11 @@ function downloadInspectorXLSX(){
 function copyInspectorJSON(){
   const table=document.getElementById('inspectorTable')?.value||'locations';
   const nRows=parseInt(document.getElementById('inspectorRows')?.value||5);
-  const raw=table==='unified'?buildUnifiedRows().slice(0,nRows):(S.raw[table]||[]).slice(0,nRows);
+  let raw;
+  if(table==='unified') raw=buildUnifiedRows().slice(0,nRows);
+  else if(table==='wh') raw=(S.wh||[]).slice(0,nRows);
+  else if(table==='wh_unmatched') raw=(S.wh||[]).filter(r=>!r.matched).slice(0,nRows);
+  else raw=(S.raw[table]||[]).slice(0,nRows);
   try{navigator.clipboard.writeText(JSON.stringify(raw,null,2));const btn=event.target;const orig=btn.textContent;btn.textContent='Copied!';setTimeout(()=>btn.textContent=orig,1500);}
   catch(e){alert('Could not copy: '+e.message);}
 }
