@@ -918,7 +918,6 @@
             &#127981; Upload Bin Contents
             <input type="file" accept=".xlsx,.xls,.csv" id="whFile" onchange="parseWH(this)" style="display:none">
           </label>
-          <button id="btnWHSettings" onclick="toggleWHSettings()" style="margin-top:2px;background:transparent;color:var(--muted);border:1px solid var(--border2);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em" title="Column mapping + Location/Zone filters">&#9881; Upload settings</button>
           <button id="btnClearWH" onclick="clearWHContents()" style="display:none;margin-top:2px;background:transparent;color:var(--red);border:1px solid var(--red);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#10005; Clear WH</button>
         </div>
       </div>
@@ -932,7 +931,6 @@
           <button id="btnWHInvAvail" class="btn btn-green btn-sm" onclick="onClickStep3B()" title="Read live availability from inventory_available. Auto-refreshes after every Step 2B (Shopify live load).">&#9729; Load from Supabase</button>
           <span id="whInvAvailSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Not loaded</span>
           <span style="font-size:10px;color:var(--hint);line-height:1.3">Auto-refreshes after Step 2B</span>
-          <button id="btnWHInvAvailSettings" onclick="toggleWHSettings()" style="margin-top:2px;background:transparent;color:var(--muted);border:1px solid var(--border2);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em" title="Location + Zone filters applied to the Supabase pull">&#9881; Upload settings</button>
         </div>
       </div>
 
@@ -945,8 +943,11 @@
       </div>
 
     </div>
+    <!-- Top-level WH dashboard: overview + settings side-by-side, both always visible.
+         Content of both panels swaps based on the active source (3A or 3B). -->
+    <div id="whTopDashboard" style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px;align-items:start">
     <!-- Unified WH overview panel — content swaps based on the active source (3A or 3B) -->
-    <div id="whOverviewPanel" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
+    <div id="whOverviewPanel" style="display:none;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div>
           <span id="whOverviewTitle" style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">overview by location</span>
@@ -967,8 +968,8 @@
       </div>
       <div id="whOverviewNote" style="font-size:10px;color:var(--hint);margin-top:8px;line-height:1.4"></div>
     </div>
-    <!-- WH upload settings (column mapping + Location/Zone filter) -->
-    <div id="whSettingsPanel" style="display:none;margin-top:14px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
+    <!-- WH upload settings (column mapping + Location/Zone filter) — always visible, sits beside the overview -->
+    <div id="whSettingsPanel" style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <span id="whSettingsTitle" style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">WH upload settings &mdash; column mapping + zone filter</span>
         <button onclick="resetWHFilterDefaults()" class="btn btn-secondary btn-sm" title="Restore defaults: Location=DE-MAIN · Zones=GOLDEN, ZONE A, ZONE B, ZONE C">&#8634; Defaults (DE-MAIN / A,B,C,GOLDEN)</button>
@@ -1003,6 +1004,7 @@
         Column mappings + filter selections persist across reloads (localStorage). Available options auto-populate from the most recent upload.
       </div>
     </div>
+    </div><!-- /whTopDashboard -->
     <!-- Step 2B progress indicator -->
     <div id="step2BStatus" style="display:none;margin-top:10px;padding:9px 13px;border-radius:var(--radius);font-size:12px;border:1px solid #85B7EB;background:var(--blue-bg);color:var(--blue)">
       &#9203; Loading live data from Shopify...
@@ -5842,7 +5844,7 @@ document.addEventListener('keydown',e=>{
 });
 
 // Init
-buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
+buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(typeof renderWHSettings==='function') renderWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
 if(typeof restoreVelTierPanel==='function') restoreVelTierPanel();
 showTab('connect');
 
