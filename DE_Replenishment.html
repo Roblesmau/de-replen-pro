@@ -460,6 +460,7 @@
   <button class="tab"        id="tab-capacity"        onclick="showTab('capacity')">Capacity</button>
   <button class="tab"        id="tab-exceptions"      onclick="showTab('exceptions')">Exceptions</button>
   <button class="tab"        id="tab-stores"          onclick="showTab('stores')">Store Selection</button>
+  <button class="tab"        id="tab-transfers"       onclick="showTab('transfers')">Transfers</button>
   <button class="tab"        id="tab-recommendations" onclick="showTab('recommendations')" style="display:none">Recommendations</button>
   <button class="tab"        id="tab-nav"             onclick="showTab('nav')" style="display:none">NAV Preview</button>
   <button class="tab"        id="tab-settings"        onclick="showTab('settings')" style="display:none">Settings</button>
@@ -779,6 +780,20 @@
     <div class="table-scroll">
       <table id="storeInvTable"><thead><tr><th>Store</th><th>SKU</th><th>Brand</th><th>Type</th><th>Store Qty</th><th>Capacity</th><th>Fill %</th></tr></thead>
       <tbody id="storeInvBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- TRANSFERS — placeholder, content TBD -->
+<div class="panel" id="panel-transfers">
+  <div class="card">
+    <div class="card-title">Transfers</div>
+    <div style="padding:48px 24px;text-align:center;color:var(--muted)">
+      <div style="font-size:36px;line-height:1;margin-bottom:12px">&#128230;</div>
+      <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px">Coming soon</div>
+      <div style="font-size:13px;max-width:480px;margin:0 auto;line-height:1.5">
+        This tab is reserved for the upcoming Transfers workflow. We'll build it out next session.
+      </div>
     </div>
   </div>
 </div>
@@ -5927,7 +5942,7 @@ function copyInspectorJSON(){
 // Keyboard shortcuts
 document.addEventListener('keydown',e=>{
   if(!e.ctrlKey&&!e.metaKey) return;
-  const tabs=['connect','inventory','dashboard','capacity','exceptions','stores','recommendations','nav','settings'];
+  const tabs=['connect','inventory','dashboard','capacity','exceptions','stores','transfers','recommendations','nav','settings'];
   const idx=parseInt(e.key)-1;
   if(idx>=0&&idx<tabs.length){e.preventDefault();showTab(tabs[idx]);}
 });
