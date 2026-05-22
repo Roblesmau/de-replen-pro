@@ -2194,7 +2194,10 @@ function showTab(t){
   if(t==='inventory'){populateInvFilters();renderInv();}
   if(t==='capacity'){ renderCap(); if(typeof pullCapacityFromSupabase==='function' && !S._capCloudPulled){ S._capCloudPulled=true; pullCapacityFromSupabase().catch(()=>{}); } }
   if(t==='exceptions'){ renderExcList(); if(typeof pullExceptionsFromSupabase==='function' && !S._excCloudPulled){ S._excCloudPulled=true; pullExceptionsFromSupabase().catch(()=>{}); } }
-  if(t==='connect'){ if(typeof pullWHFromSupabase==='function' && !S._whCloudPulled){ S._whCloudPulled=true; pullWHFromSupabase().catch(()=>{}); } }
+  // Gate by source: pullWHFromSupabase reads de_wh_bins (the 3A source). Firing it while
+  // the user is in 3B (Supabase live) mode would let processWHRows overwrite the active
+  // inventory_available data with stale 3A bin counts on every Connect-tab visit.
+  if(t==='connect'){ if(S.whSource==='upload' && typeof pullWHFromSupabase==='function' && !S._whCloudPulled){ S._whCloudPulled=true; pullWHFromSupabase().catch(()=>{}); } }
 }
 
 function setMode(m){
