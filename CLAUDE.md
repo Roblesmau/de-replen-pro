@@ -51,21 +51,26 @@ After connecting GitHub in Vercel project settings, step 2 becomes automatic on 
 - CDN libs: Chart.js 4.4.1, SheetJS/xlsx 0.18.5
 - localStorage: credentials (`de_sb_url`, `de_sb_key`, `de_proxy_url`, `de_shopify_token`) + capacity (`de_capacity_v1`)
 
-### Step Flow (Current)
+### Step Flow (Current — renamed May 2026)
 ```
 Step 1  — Test Connection
-Step 2A — Product Catalog (choose ONE):
-            loadCatalogFromCache()    -> reads Supabase -> auto-triggers 2B
-            loadCatalogFromShopify()  -> Pass B + Pass A -> Supabase sync -> auto-triggers 2B
-Step 2B — Live Data (auto, always fresh):
+Step 2  — Product Catalog (choose ONE):
+            loadCatalogFromCache()    -> reads Supabase -> auto-triggers Step 3
+            loadCatalogFromShopify()  -> Pass B + Pass A -> Supabase sync -> auto-triggers Step 3
+Step 3  — Live Data (auto, always fresh):
             loadLiveData(itemMap)
             -> Locations
             -> Inventory (batch by item IDs)
             -> Orders 90d + Prior Year (parallel, sequential fallback)
             -> processLiveData() -> DATA[] -> apply PY velocity
-Step 3  — Upload WH Bin Contents
-Step 4  — Inspect Data
+            -> refreshWHAfterStep2B() -> auto-fires Step 4A or 4B based on S.whSource
+Step 4A — WH Bin Contents (Excel upload OR pull last upload from de_wh_bins)
+   OR
+Step 4B — Live availability from Supabase inventory_available (read-only)
+Step 5  — Inspect Data
 ```
+
+**Numbering note:** the function `loadLiveData` is still called "Step 2B" in code (variable names, status IDs, log messages), but the **user-visible label** is now `Step 3`. The `setStep()` label dictionary maps internal keys `1/'2a'/'2b'/3/4` to visible prefixes `1/2/3/4/5`. Don't rename the internal keys — too many touchpoints, no functional gain.
 
 ### Universal Key: Variant SKU
 - `Variant SKU` (from `variants[].sku`) is the ONE universal key across all tables
@@ -97,6 +102,18 @@ Step 4  — Inspect Data
 - **`/orders.json` works** — paginate with `created_at_max` cursor (NOT `since_id`)
 - **`/inventory_items.json?ids=` works** — safety net for unmapped item IDs
 - **Auth:** `X-DE-Domain` + `X-DE-Token` headers, or `X-DE-Auth` (base64 `domain:token`). Never URL params
+
+### CRITICAL — Shopify API version is coupled across app + proxy
+- Both the app (`DE_Replenishment.html`) and the proxy (`shopify_proxy_vercel/` — separate Vercel project, source NOT in this repo) hardcode the Shopify API version (currently `/admin/api/2024-01/`).
+- The proxy has an **allowlist** that rejects any version it doesn't recognize with `403 Endpoint not allowed`.
+- **Bumping the app version alone breaks every API call.** You MUST update the proxy's allowlist at the same time.
+- When the 2024-01 version eventually sunsets (Shopify deprecates after 24 months — early 2026 is the danger zone), the migration is:
+  1. Locate the proxy source code (NOT in this repo — separate Vercel project `de-shopify-proxy`, Vercel team `team_WukDaY2vZ0o3j0S0RwLXdwuV`, project id `prj_Bqbs4ki3fyperVixSWkYhU64Yb0L`). Source may be on dev's machine or another git repo.
+  2. Update proxy allowlist + redeploy
+  3. Update all 8 `2024-01` references in `DE_Replenishment.html`
+  4. Update CLAUDE.md examples (2 places)
+  5. Ship together — never the app alone.
+- **Transient 404s mid-pagination** (e.g. page 1 of variants works, page 2 returns 404) are usually Shopify rate-limit hiccups or proxy timeouts, NOT version sunset. Retry once before assuming the version is dead.
 
 ---
 
@@ -337,23 +354,56 @@ locs.filter(l => l.active
 
 ## UI Structure
 
-### Tab Order (DO NOT CHANGE)
-`Live Connect -> Inventory -> Dashboard -> Capacity -> Exceptions -> Store Selection`
+### Tab Order (current — Transfers added May 2026)
+`Live Connect -> Inventory -> Dashboard -> Capacity -> Exceptions -> Store Selection -> Transfers`
 
-The Settings tab is hidden by default (`display:none` on the button) and only contains NAV export settings — all data-source/priority/replenishment-rules controls have been moved out.
+Transfers is a placeholder (May 2026); content TBD. Keyboard shortcut Ctrl+7 = Transfers. The Settings tab is hidden by default (`display:none` on the button) and only contains NAV export settings — all data-source/priority/replenishment-rules controls have been moved out.
 
-### Live Connect Steps (Current)
+### Live Connect Steps (Current — renamed May 2026)
 1. Test connection
-2A. Load from cache OR Full Shopify load (product catalog)
-2B. Auto: Locations + Inventory + Orders 90d + Prior Year
-3. Upload WH Bin Contents
-4. Inspect data
+2.  Load from cloud OR Full Shopify load (product catalog)
+3.  Auto: Locations + Inventory + Orders 90d + Prior Year (was 2B)
+4A. Upload WH Bin Contents (Excel) — pushed to `de_wh_bins`
+4B. Load live availability from Supabase `inventory_available` (read-only)
+5.  Inspect data
+
+User picks 4A or 4B via the **WH source segmented toggle** above the steps row (persistence: `localStorage.de_wh_source`). Default is 4A. After Step 3 completes, `refreshWHAfterStep2B()` auto-fires the matching Step 4 path so the pipeline is one click end-to-end.
+
+### WH Source Selection (4A vs 4B)
+
+**Step 4A — Excel upload (`de_wh_bins` cloud table)**
+- User uploads NAV bin contents Excel file via `parseWH()`.
+- Filtered at upload time by Allowed Locations + Allowed Zones in **Upload Settings**.
+- Only filtered rows pushed to `de_wh_bins` via `pushWHToSupabase()`.
+- Schema: `de_wh_bins(id, bin_code, item_no, qty, location_code, zone_code, uploaded_at, uploaded_by)` + `de_wh_meta(id=1, last_uploaded_at, last_uploaded_by, row_count, sku_count)`.
+- "Load from cloud" button under Step 4A re-pulls the last upload.
+- `S.whRaw` carries the per-bin granularity; `S.wh` is the SKU-aggregated view used by `buildRecos`.
+
+**Step 4B — Supabase live (`inventory_available` table)**
+- Populated by an external Python script (SQL Server → Supabase). App is read-only against this table.
+- Schema: `inventory_available(item_no, location_code, total_inventory, reserved_for_picking, reserved_for_ato, available_qty, number_of_bins, sample_zone, synced_at, row_hash)`. PK `(item_no, location_code)`.
+- Replenishment uses `available_qty` (excludes reservations).
+- Filters applied: `?available_qty=gt.0` + `?location_code=in.(...)` server-side, `sample_zone` filter client-side.
+- "Load from Supabase" button under Step 4B re-pulls fresh.
+- Auto-refreshes whenever Step 3 (loadLiveData) completes — no separate timer.
+
+**WH overview panel** (`#whOverviewPanel`) — single shared panel that swaps content based on the active source. Mirrors the SQL:
+```sql
+-- Step 4A:
+select location_code, count(distinct item_no) as skus, sum(qty) as qty
+  from de_wh_bins group by location_code order by location_code;
+-- Step 4B:
+select location_code, count(*) as skus, sum(available_qty) as available, max(synced_at)
+  from inventory_available group by location_code order by location_code;
+```
+Located in the top-of-Live-Connect 2-column grid, paired with the always-visible **Upload Settings** panel. The settings panel hides the column-mapping section when 4B is active (column mapping only matters for Excel uploads).
 
 ### Raw Data Inspector
-- Dropdown: Unified Join View | Locations | Products | Inventory Levels | Orders 90d | Orders Prior Year | WH Bin Contents
+- Dropdown: Unified Join View | Locations | Products | Inventory Levels | Orders 90d | Orders Prior Year | WH Bin Contents | ⚠ WH SKUs without Shopify match | ⚠ Warnings — Unknown SKUs
 - Buttons: Copy JSON | Download (Excel of current selection)
 - Stats bar: date range badge + units sold · returned · net
 - Orders 90d badge: blue · Orders Prior Year badge: amber
+- "WH SKUs without Shopify match" — lists `S.wh.filter(w => !w.matched)` with bin/location/zone cross-ref + heuristic "Likely cause" (whitespace, leading apostrophe, missing from catalog). Auto-shown when unmatched count > 0; hidden after Clear WH.
 - Appears BEFORE "Data Loaded from Shopify" card
 
 ### Filter Architecture — CENTRALIZED (as of commit 2302c55, Apr 24 2026)
@@ -601,8 +651,9 @@ S = {
 - [ ] Simulator has NO `simStore` / `simBrand` / `simType` dropdowns / slider — only `simFilterDisplay`, `simUnitsInput`, Simulate button
 - [ ] `getFD()` reads only `invStoreFilter` / `invBrandFilter` / `invTypeFilter` — no Dashboard fallback
 - [ ] `populateDashFilters`, `populateSimSelects`, `syncInvToDash`, `syncDashToInv`, `applySettings`, `savePriority` are ABSENT
-- [ ] Tab DOM order: `tab-connect`, `tab-inventory`, `tab-dashboard`, `tab-capacity`, `tab-exceptions`, `tab-stores` (Settings hidden)
+- [ ] Tab DOM order: `tab-connect`, `tab-inventory`, `tab-dashboard`, `tab-capacity`, `tab-exceptions`, `tab-stores`, `tab-transfers` (Settings hidden)
 - [ ] `panel-exceptions` present with `excFile` upload + `excCount` + Download/Export/Clear buttons
+- [ ] `panel-transfers` present (placeholder "Coming soon" card)
 - [ ] `S.exceptions` is a `Set` (not array) initialized in S
 - [ ] `isExcepted(storeId, sku)` check at the TOP of the `DATA.forEach` in `buildRecos`
 - [ ] `velTierPanel` toggleable in Store Selection tab; `S.velTiers` defaulted from `VEL_TIERS_DEFAULT`
@@ -610,9 +661,38 @@ S = {
 - [ ] `scopeBadges` populated by `renderScopeBadges()` showing stores · brands · types counts
 - [ ] Capacity tab top section: capacity matrix upload card with `downloadCapTemplate` button
 - [ ] `loadCapFromLocalStorage()` + `applyCapToData()` called in `processLiveData` AFTER S.CAP rebuild
-- [ ] `loadVelTiers()` + `loadExcFromLocalStorage()` + `loadStoreSelection()` called in both boot path (after `buildSample`) and live-data path (in `processLiveData`)
+- [ ] `loadVelTiers()` + `loadExcFromLocalStorage()` + `loadStoreSelection()` + `loadWHSettings()` + `loadWHSource()` called in both boot path (after `buildSample`) and live-data path (in `processLiveData`)
 - [ ] Settings tab ONLY contains NAV export settings card (no Data source / Store priority / Replenishment rules / Capacity upload)
-- [ ] localStorage keys: `de_capacity_v1`, `de_capacity_saved_at`, `de_exceptions_v1`, `de_store_sel_set`, `de_store_sel_order`, `de_priority_mode`, `de_vel_tiers`, `de_allow_overcap`, plus existing `de_inv_*_filter`
+- [ ] localStorage keys: `de_capacity_v1`, `de_capacity_saved_at`, `de_exceptions_v1`, `de_store_sel_set`, `de_store_sel_order`, `de_priority_mode`, `de_vel_tiers`, `de_overcap_pct`, `de_wh_source`, `de_wh_col_map`, `de_wh_filter_locations`, `de_wh_filter_zones`, `de_wh_all_locations`, `de_wh_all_zones`, `de_wh_all_sheets`, `de_wh_all_columns`, `de_user_label`, `de_vel_panel_open`, plus existing `de_inv_*_filter`
+
+### Step 4A/4B + WH source toggle invariants
+- [ ] WH source segmented toggle present (`#whSrcBtnUpload`, `#whSrcBtnSupabase`) with `selectWHSource(target)` handlers
+- [ ] `S.whSource` persisted in `de_wh_source`; defaults to `'upload'`
+- [ ] `S.whRaw` carries per-bin granularity with `location_code` + `zone_code` populated; `S.wh` is SKU-aggregated
+- [ ] `de_wh_bins` schema includes `location_code` + `zone_code` columns (DDL ran)
+- [ ] `pushWHToSupabase` writes both columns; `pullWHFromSupabase` reads them
+- [ ] `processWHRows` RESETS every `DATA[].whQty=0` before applying new `S.wh` values (prevents stale residue when filter narrows)
+- [ ] `pullFromInventoryAvailable` includes `?available_qty=gt.0` + `&order=item_no` + server-side `location_code=in.(...)` filter
+- [ ] `refreshWHAfterStep2B()` routes to the correct path based on `S.whSource` (both 4A and 4B paths covered)
+- [ ] `showTab('connect')` checks `S.whSource==='upload'` before firing `pullWHFromSupabase` (otherwise overwrites 3B data)
+- [ ] Unified `#whOverviewPanel` swaps content via neutral DOM IDs (`whOverviewTitle`, `whOverviewSubtitle`, `whOverviewQtyHeader`, `whOverviewBody`, `whOverviewFoot`, `whOverviewNote`) — no separate panels per source
+- [ ] Refresh functions `refreshWHUploadOverview`/`refreshInvAvailOverview` guard with `if(S.whSource !== expected) return` on non-manual calls
+- [ ] Column-mapping section in Upload Settings hides when 4B is active (`updateWHSourcePill` toggles `#whColMappingSection`)
+- [ ] Raw Data Inspector exposes "⚠ WH SKUs without Shopify match" option, auto-shown when `S.wh.filter(w=>!w.matched).length > 0`
+
+### Replenishment math invariants (per current `buildRecos`)
+- [ ] Aggregate room check: `aggOnHand[bucket]` pre-computed from real DATA, `aggUsed[bucket]` accumulates during loop. `aggRoom = effectiveCap - baseOnHand - aggUsed`. Multiple SKUs in same (store, brand, type) share one budget
+- [ ] Synthetic gap-fill rows process FIRST: `DATA = injected.concat(realRows)` after gap-fill injection (new-to-store wins aggregate room)
+- [ ] No brand+type fallback for `wh.whQty` on real rows — if SKU not in `S.wh`, `whQty=0` (prevents phantom recos eating budget)
+- [ ] `getEffectiveCap(sid, b, t) = base × (1 + S.overCapPct/100)` — over-cap tolerance configurable in Send Qty Rules
+- [ ] `tierGap = max(0, tierQty - storeQty)` (NOT `tierQty` alone) — top up to target, don't blindly fill
+
+### Inventory tab invariants
+- [ ] `renderInv()` uses memoization via `_invRenderCache` keyed on data/cap/wh version tokens + filter selections + forecast model
+- [ ] Single-pass aggregation loop builds `perStore` + `aggByBT` in one traversal (replaces 5+ separate DATA scans)
+- [ ] Version-bump helpers exist: `bumpDataVersion()`, `bumpCapVersion()`, `bumpWhVersion()`
+- [ ] SKU detail table: WH column is leftmost; TOTAL row sits under header with `class="sticky-total"`; first 3 columns (WH, Brand, Type) are sticky-left
+- [ ] `.table-scroll` wrapper class used on inventory/capacity/store-selection tables (max-height:75vh, overflow:auto, sticky thead via CSS)
 
 ---
 
@@ -669,6 +749,19 @@ S = {
 | SKU sent again even when store already has it in stock | `desiredQty = min(tierQty, room)` — used full tier qty instead of the gap to tier target. A store with 1 unit and tier=1 still got another unit because shelf room>0 | `desiredQty = min(tierQty - storeQty, room)` — only ship the missing units to reach the tier target. tier=1 + storeQty=1 → send 0; tier=5 + storeQty=1 → send 4 |
 | Capacity Excel export had phantom rows (e.g. ABATTA × BACKPACK / CLIPS / GOGGLES that don't exist in catalog) | `exportCapXLSX` iterated `BRANDS × TYPES` Cartesian product instead of catalog combos | Use the same `catalogCombos` source as `renderCap` (driven from `S.raw.itemMap`); fall back to non-zero S.CAP cells if no catalog loaded yet |
 | Capacity total on screen disagrees with re-exported Excel (e.g. footer says 28,921 but Excel exports 29,000+) | Two distinct causes: (1) Cells where brand has a value in `S.CAP` but isn't in `S.STORE_BRANDS[storeId]` — table shows "+" placeholder, footer skips, export emits. (2) `(brand, type)` pairs not in live catalog — filtered from `catalogCombos` so excluded from table view but still in `S.CAP` | (1) `renderCap` now self-heals at render time: any brand with a non-zero value in `S.CAP` is auto-added to `S.STORE_BRANDS[sid]` and to `BRANDS` if missing. (2) Footer shows BOTH `visible total` and `stored grand total` (true sum across `S.CAP`); when they differ, an amber pill surfaces hidden units + count of orphaned combos with a `show` button (`showOrphanedCapacity`) listing the offending pairs |
+| WH TOTAL in SKU detail > what's actually in `S.wh` after switching Location filter | `processWHRows` only wrote new `d.whQty` values for SKUs that matched the new `S.wh`; SKUs that fell out of scope kept stale values from the previous load | Reset `DATA.forEach(d=>{d.whQty=0;})` FIRST inside `processWHRows`, THEN apply new values. Single source of truth: only SKUs in the current `S.wh` have non-zero `whQty` |
+| Run replenishment produces empty plan immediately after Clear results | `runRun()` called `filterActive()` against the wiped `S.recos` — never rebuilt it. Only filter changes were rebuilding `S.recos` via `handleInvFilter` | `runRun` calls `buildRecos()` first so the Run is stateless w.r.t. prior clears |
+| All brands selected → only 2 Ray-Ban units ship despite 233 units of room | Per-SKU `room = d.cap - d.storeQty` check let any one SKU "see" full bucket headroom; brand+type aggregate was never enforced | Pre-compute `aggOnHand[bucket]` from real DATA, track `aggUsed[bucket]` during the loop, `aggRoom = effectiveCap - baseOnHand - aggUsed`. Multiple SKUs in same bucket share one budget |
+| Gap-fill ships 0 new-to-store SKUs even when room exists | Synthetic gap-fill rows were appended at the END of DATA; under-target real rows iterated first and ate `aggUsed` budget | `DATA = injected.concat(realRows)` — synthetic rows process FIRST so new-to-store wins aggregate room |
+| Real DATA row with no WH-match inflates `aggUsed` with phantom recos | `whQty` fallback used the brand+type SUM when SKU not in `S.wh`, then `filterActive` dropped the phantom rec at WH pool stage — budget already wasted | Drop the brand+type fallback: real rows w/o exact SKU match get `whQty=0`, no reco pushed, no budget eaten |
+| Switching to Connect tab in 3B mode silently reloads stale 3A data | `showTab('connect')` fired `pullWHFromSupabase()` (reads `de_wh_bins` = 3A source) unconditionally; `_whCloudPulled` flag never set in the supabase boot branch | Gate by `S.whSource==='upload'` in `showTab('connect')`. The 4B path is handled separately by `refreshLiveConnectCloudLabels` |
+| Inventory tab `% full` and "X recs" pill stale after Clear results | `clearReplenishmentResults` wiped `S.recos` but `S.storeStats[id].recos` was last written during `buildRecos` and kept its old count | `clearReplenishmentResults` zeroes `S.storeStats[id].recos` for every store before re-rendering. `pct` is left alone since it reflects inventory state, not run output |
+| Inventory tab filter row orphans columns awkwardly at ~1100px | Uncapped `flex-wrap` with `min-width:180px` allowed two-row reflows with the "Actions" column dangling | New `.inv-filter-row` uses `grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))`. Mobile breakpoint at 600px stacks vertically. |
+| Sticky headers don't pin on tall tables in Inventory / Capacity / Store Selection | Tables were inside `overflow-x:auto` wrappers — `position:sticky` only sticks within nearest scroll ancestor, which existed but had no `max-height` so it never engaged | New `.table-scroll` class: `overflow:auto; max-height:75vh; position:relative;`. `<thead> th` gets `position:sticky; top:0`. SKU detail's TOTAL row gets a second sticky row at `top:34px` |
+| WH SKUs not in Shopify catalog silently ignored | No surfaced report of unmatched SKUs — operator has no way to fix the mapping | New "⚠ WH SKUs without Shopify match" option in Raw Data Inspector. Lists `S.wh.filter(w=>!w.matched)` with bin/loc/zone + heuristic root-cause (whitespace, apostrophe, missing catalog entry). Download to XLSX wired |
+| Bumping Shopify API version in the app alone broke every API call with `403 Endpoint not allowed` | The proxy has its own allowlist hardcoding `2024-01`. App + proxy versions are coupled; updating app alone breaks both | App + proxy must be updated together. Proxy source is NOT in this repo (separate Vercel project `de-shopify-proxy`) — find/update it first, THEN bump the app, THEN commit both together |
+| Transient 404 mid-Shopify-pagination (page 1 worked, page 2 returns 404) | Not necessarily API version sunset — often a brief Shopify or proxy hiccup. `shopifyFetch` doesn't currently retry on 404 | Try the operation again before assuming the version is dead. If reproducible, capture the failing URL + response body from DevTools Network tab to diagnose properly |
+| Both WH overview panels (3A and 3B) showed at once during source switches | Two separate panels (`#whUploadOverview` + `#whInvAvailOverview`) raced — async refresh callbacks could both fire before the toggle hid one | Consolidated into a single `#whOverviewPanel` whose content swaps based on `S.whSource`. Refresh functions guard with `if(S.whSource !== expected) return;` to prevent cross-mode rendering |
 
 ---
 
