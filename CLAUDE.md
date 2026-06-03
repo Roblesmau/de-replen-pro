@@ -134,7 +134,7 @@ const invBatchSize = Math.floor(250 / Math.max(retailLocIds.length, 1)); // = 35
 let allInv = [];
 for(let i = 0; i < allItemIds.length; i += invBatchSize){
   const batch = allItemIds.slice(i, i + invBatchSize);
-  const url = '/admin/api/2026-01/inventory_levels.json'
+  const url = '/admin/api/2024-01/inventory_levels.json'
     + '?inventory_item_ids=' + batch.join(',')
     + '&location_ids=' + retailLocIds.join(',')
     + '&limit=250';
@@ -174,7 +174,7 @@ allInv = [...invDedup.values()];
 async function fetchOrderPages(minDate, maxDate, label){
   let orders = [], cursor = maxDate;
   while(true){
-    const url = '/admin/api/2026-01/orders.json'
+    const url = '/admin/api/2024-01/orders.json'
       + '?status=any&created_at_min=' + minDate
       + '&created_at_max=' + cursor
       + '&limit=250&fields=id,location_id,line_items,refunds,created_at';
