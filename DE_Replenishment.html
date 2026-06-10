@@ -5061,12 +5061,29 @@ async function testConn(){
     const data=await shopifyFetch('/admin/api/2024-01/locations.json');
     const locs=data.locations||[];
     locs.forEach(l=>clog('  ✓ '+l.id+': '+l.name+' ('+( l.city||'')+')'));
-    setConnStatus('✓ Connected — '+locs.length+' locations. Click Load live data next.','s-ok');
+    setConnStatus('✓ Connected — '+locs.length+' locations.','s-ok');
     {const _b=document.getElementById('modeBadge');if(_b){_b.textContent='Live Shopify POS';_b.className='badge badge-live';}}
     setStep(1,'ok');
     // setStep handles unlocking both 2A buttons
     // Also fetch when the catalog cache was last refreshed so user knows what they're loading
     refreshCacheLastSync().catch(()=>{});
+    // ── Auto-cascade ──────────────────────────────────────────────────
+    // After a successful connection, kick off the matching Step 2 path based
+    // on the Item Catalog toggle. That path already auto-triggers Step 3,
+    // which already auto-triggers Step 4A or 4B based on the WH source toggle.
+    // Guard: only auto-cascade if no DATA is loaded yet — otherwise a casual
+    // re-test would burn 5–8 min on a Shopify reload unnecessarily.
+    if(!DATA.length || S.mode==='sample'){
+      const src=S.catalogSource==='shopify'?'shopify':'cache';
+      clog('→ Auto-cascade: starting Step 2'+(src==='shopify'?'B (Full Shopify load)':'A (Cloud cache)')+'…');
+      if(src==='shopify'){
+        if(typeof loadCatalogFromShopify==='function') loadCatalogFromShopify();
+      } else {
+        if(typeof loadCatalogFromCache==='function') loadCatalogFromCache();
+      }
+    } else {
+      clog('→ Connection verified. DATA already loaded — skipping auto-cascade. Click a Step 2 segment to re-load.');
+    }
   }catch(e){
     clog('✗ '+e.message);setConnStatus('✗ '+e.message,'s-err');setStep(1,'err');
   }
