@@ -872,6 +872,25 @@
       <div class="field"><label>Supabase URL</label><input type="text" id="sbUrl" placeholder="https://xxxx.supabase.co"></div>
       <div class="field"><label>Supabase anon key</label><input type="password" id="sbKey" placeholder="eyJ..."></div>
     </div>
+    <!-- Item Catalog segmented toggle — pick which Step 2 path to run -->
+    <div id="catalogSourceWrap" style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <span style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Item Catalog</span>
+        <span style="font-size:10px;color:var(--hint)">Click a segment to run that path</span>
+      </div>
+      <div role="radiogroup" aria-label="Item Catalog source" class="wh-source-toggle">
+        <button id="catSrcBtnCache" type="button" role="radio" aria-checked="false" onclick="selectCatalogSource('cache')" class="wh-src-seg">
+          <span class="wh-src-num">2A</span>
+          <span class="wh-src-name">Cloud (cache)</span>
+          <span class="wh-src-sub" id="catSrcSubCache">checking…</span>
+        </button>
+        <button id="catSrcBtnShopify" type="button" role="radio" aria-checked="false" onclick="selectCatalogSource('shopify')" class="wh-src-seg">
+          <span class="wh-src-num">2B</span>
+          <span class="wh-src-name">Full Shopify load</span>
+          <span class="wh-src-sub" id="catSrcSubShopify">Live fetch · 5–8 min</span>
+        </button>
+      </div>
+    </div>
     <!-- WH source segmented toggle — pick which Step 4 path runs after Step 3 -->
     <div id="whSourceWrap" style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div style="display:flex;flex-direction:column;gap:2px">
@@ -1171,7 +1190,7 @@ const COST={'Ray-Ban':52,'Oakley':70,'Gucci':210,'Prada':215,'Tom Ford':180,'Mau
 const DCAP={'Ray-Ban':{Sunglasses:60,Optical:40,Kids:20},'Oakley':{Sunglasses:50,Optical:30,Kids:15},'Gucci':{Sunglasses:25,Optical:20,Kids:0},'Prada':{Sunglasses:25,Optical:20,Kids:0},'Tom Ford':{Sunglasses:25,Optical:20,Kids:0},'Maui Jim':{Sunglasses:40,Optical:25,Kids:10},'Versace':{Sunglasses:20,Optical:15,Kids:0},'Tiffany':{Sunglasses:15,Optical:12,Kids:0}};
 
 const VEL_TIERS_DEFAULT=[{minPerWeek:0,qty:1},{minPerWeek:1,qty:2},{minPerWeek:3,qty:3},{minPerWeek:7,qty:5}];
-const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],whSource:'upload',whInvAvail:{lastSync:null,rowCount:0,lastError:null},whColMap:{sheet:'',sku:'',bin:'',qty:'',loc:'',zone:''},whFilter:{locations:['DE-MAIN'],zones:['GOLDEN','ZONE A','ZONE B','ZONE C']},whAllLocations:['DE-MAIN'],whAllZones:['GOLDEN','ZONE A','ZONE B','ZONE C'],whAllSheets:[],whAllColumns:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),_dataVersion:0,_capVersion:0,_whVersion:0,  raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
+const S={mode:'sample',sel:new Set(),recos:[],activeRecos:[],hotT:3,reorderD:30,defQty:1,hotQty:2,wh:[],whRaw:[],whSource:'upload',whInvAvail:{lastSync:null,rowCount:0,lastError:null},catalogSource:'cache',whColMap:{sheet:'',sku:'',bin:'',qty:'',loc:'',zone:''},whFilter:{locations:['DE-MAIN'],zones:['GOLDEN','ZONE A','ZONE B','ZONE C']},whAllLocations:['DE-MAIN'],whAllZones:['GOLDEN','ZONE A','ZONE B','ZONE C'],whAllSheets:[],whAllColumns:[],CAP:{},ORIG:{},STORE_BRANDS:{},capChanges:0,newBrands:new Set(),vm:'units',priority:'urgency',selOrder:[],velTiers:VEL_TIERS_DEFAULT.map(t=>({...t})),overCapPct:0,exceptions:new Set(),_dataVersion:0,_capVersion:0,_whVersion:0,  raw:{locations:[],products:[],inventory:[],orders:[],ordersPY:[],inventoryItems:[]}
 };
 let DATA=[],charts={};
 // Cache-invalidation tokens — bump whenever the underlying data changes so memoized
@@ -3886,6 +3905,66 @@ function loadWHSource(){
     S.whSource=(src==='supabase')?'supabase':'upload';
   }catch(_){ S.whSource='upload'; }
 }
+// ===== Item Catalog source switching (Step 2A vs 2B) =====
+function saveCatalogSource(){
+  try{ localStorage.setItem('de_catalog_source',S.catalogSource||'cache'); }catch(_){}
+}
+function loadCatalogSource(){
+  try{
+    const src=localStorage.getItem('de_catalog_source');
+    S.catalogSource=(src==='shopify')?'shopify':'cache';
+  }catch(_){ S.catalogSource='cache'; }
+}
+function updateCatalogSourcePill(){
+  const isShopify=S.catalogSource==='shopify';
+  // Mirror Step 2A's cache freshness label into the segment sub-status
+  const subA=document.getElementById('catSrcSubCache');
+  const cacheLbl=document.getElementById('cacheLastSync');
+  if(subA){
+    if(cacheLbl && cacheLbl.textContent && cacheLbl.textContent.trim()){
+      subA.innerHTML=cacheLbl.innerHTML;
+    } else {
+      subA.textContent='checking…';
+    }
+  }
+  // 2B sub-status is static
+  const subB=document.getElementById('catSrcSubShopify');
+  if(subB) subB.textContent='Live fetch · 5–8 min';
+  // Active class toggling
+  const segA=document.getElementById('catSrcBtnCache');
+  const segB=document.getElementById('catSrcBtnShopify');
+  if(segA){ segA.classList.toggle('active',!isShopify); segA.setAttribute('aria-checked',(!isShopify).toString()); }
+  if(segB){ segB.classList.toggle('active',isShopify); segB.setAttribute('aria-checked',isShopify.toString()); }
+  // Dim the inactive Step column in the steps row so the active path is unmistakable
+  const colA=document.getElementById('step2aCol');
+  const colB=document.getElementById('step2bCol');
+  if(colA) colA.style.opacity=isShopify?'0.55':'1';
+  if(colB) colB.style.opacity=isShopify?'1':'0.55';
+}
+async function selectCatalogSource(target){
+  if(target!=='cache' && target!=='shopify') return;
+  // If already on this source AND data is loaded, treat as manual refresh.
+  // Otherwise switch the preference and fire the matching loader.
+  if(S.catalogSource===target && DATA.length>0){
+    // Manual re-run — confirm to avoid accidental Shopify re-fetch (~5-8 min)
+    if(target==='shopify' && !confirm('Re-run full Shopify load?\n\nThis will re-fetch ~30k variants + products (~5–8 min). Click OK to continue.')) return;
+    if(target==='cache'){
+      if(typeof loadCatalogFromCache==='function') loadCatalogFromCache();
+    } else {
+      if(typeof loadCatalogFromShopify==='function') loadCatalogFromShopify();
+    }
+    return;
+  }
+  S.catalogSource=target;
+  saveCatalogSource();
+  updateCatalogSourcePill();
+  // Fire the matching loader (mirrors how 4A/4B's selectWHSource fires its loader)
+  if(target==='cache'){
+    if(typeof loadCatalogFromCache==='function') loadCatalogFromCache();
+  } else {
+    if(typeof loadCatalogFromShopify==='function') loadCatalogFromShopify();
+  }
+}
 function updateWHSourcePill(){
   const isSb=S.whSource==='supabase';
   // Sub-text for each segment
@@ -5953,7 +6032,8 @@ document.addEventListener('keydown',e=>{
 });
 
 // Init
-buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(typeof renderWHSettings==='function') renderWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
+buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(typeof loadCatalogSource==='function') loadCatalogSource();if(typeof renderWHSettings==='function') renderWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
+if(typeof updateCatalogSourcePill==='function') updateCatalogSourcePill();
 if(typeof restoreVelTierPanel==='function') restoreVelTierPanel();
 showTab('connect');
 
