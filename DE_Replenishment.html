@@ -1271,8 +1271,11 @@ function buildRecos(){
   //        (b) aggregate room (effectiveCap - currentOnHand - alreadyPromised) > 0.
   // The aggregate check prevents over-capacity stores from receiving brand-new SKUs.
   if(S.wh.length>0 && S.raw.itemMap && Object.keys(S.raw.itemMap).length){
-    // Build set of existing store+sku combos in DATA
-    const dataKeys=new Set(DATA.map(d=>d.storeId+'|'+d.sku.toLowerCase()));
+    // Build set of existing store+sku combos in DATA — REAL rows only.
+    // Including synthetic rows from the previous run made injection oscillate:
+    // run N injects, run N+1 sees the stale synthetic combo in dataKeys, skips
+    // re-injection, then wipes the stale row → SKU vanishes → run N+2 injects again.
+    const dataKeys=new Set(DATA.filter(d=>!d._synthetic).map(d=>d.storeId+'|'+d.sku.toLowerCase()));
     // Build sku → itemMap entry lookup
     const skuToMeta={};
     Object.values(S.raw.itemMap).forEach(v=>{
