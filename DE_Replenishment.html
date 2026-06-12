@@ -210,6 +210,21 @@
   .wh-src-num { font-size:10px; font-weight:700; letter-spacing:0.05em; color:var(--hint); text-transform:uppercase; }
   .wh-src-name { font-size:13px; font-weight:600; color:var(--text); }
   .wh-src-sub { font-size:10px; color:var(--hint); font-weight:400; }
+
+  /* Step progress indicators — small status dot beneath each step column */
+  .step-status {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:18px; height:18px; border-radius:50%;
+    font-size:11px; font-weight:700; line-height:1;
+    margin-top:6px; transition:background-color .2s ease, color .2s ease;
+    user-select:none;
+  }
+  .step-status.p-pending { background:transparent; color:var(--hint); border:1px dashed var(--border2); }
+  .step-status.p-loading { background:var(--blue-bg); color:var(--blue); border:1px solid var(--blue); animation:pulse 1.4s ease-in-out infinite; }
+  .step-status.p-ok      { background:var(--green); color:#fff; border:1px solid var(--green); }
+  .step-status.p-err     { background:var(--red); color:#fff; border:1px solid var(--red); }
+  .step-status.p-na      { background:transparent; color:var(--border2); border:1px solid var(--border); }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.55 } }
   [data-theme="dark"] .wh-src-seg.active { background:var(--blue); color:#0B0F1A; }
   [data-theme="dark"] .wh-src-seg.active .wh-src-num,
   [data-theme="dark"] .wh-src-seg.active .wh-src-name,
@@ -916,6 +931,7 @@
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 1</span>
         <button id="btnTest" class="btn btn-secondary btn-sm" onclick="testConn()">&#128268; Test connection</button>
+        <span id="prog1" class="step-status p-pending" title="Step 1 status">○</span>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -925,6 +941,7 @@
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 2A &mdash; Cloud</span>
         <button id="btnCache" class="btn btn-green btn-sm" onclick="loadCatalogFromCache()" title="Read product catalog from Supabase &mdash; fast, then auto-loads live data" disabled style="opacity:.4;cursor:not-allowed">&#9889; Load from cloud</button>
         <span id="cacheLastSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud…</span>
+        <span id="prog2a" class="step-status p-pending" title="Step 2A status">○</span>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -933,6 +950,7 @@
       <div id="step2bCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 2B &mdash; Shopify</span>
         <button id="btnLoad" class="btn btn-primary btn-sm" onclick="loadCatalogFromShopify()" title="Full Shopify fetch &mdash; syncs catalog to Supabase, then auto-loads live data" disabled style="opacity:.4;cursor:not-allowed">&#128229; Full Shopify load</button>
+        <span id="prog2b" class="step-status p-pending" title="Step 2B status">○</span>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -943,6 +961,7 @@
         <div id="btn2B" style="font-size:11px;color:var(--muted);padding:5px 11px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);white-space:nowrap;text-align:center;line-height:1.5">
           Auto: Locations<br>Inventory &middot; Orders &middot; Prior Year
         </div>
+        <span id="prog3" class="step-status p-pending" title="Step 3 status">○</span>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -959,6 +978,7 @@
           </label>
           <button id="btnClearWH" onclick="clearWHContents()" style="display:none;margin-top:2px;background:transparent;color:var(--red);border:1px solid var(--red);padding:3px 9px;font-size:10px;font-weight:600;border-radius:var(--radius);cursor:pointer;letter-spacing:.02em">&#10005; Clear WH</button>
         </div>
+        <span id="prog4a" class="step-status p-pending" title="Step 4A status">○</span>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -971,6 +991,7 @@
           <span id="whInvAvailSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Not loaded</span>
           <span style="font-size:10px;color:var(--hint);line-height:1.3">Auto-refreshes after Step 3</span>
         </div>
+        <span id="prog4b" class="step-status p-pending" title="Step 4B status">○</span>
       </div>
 
       <div style="color:var(--border2);font-size:16px;margin-top:12px">&rarr;</div>
@@ -978,7 +999,8 @@
       <!-- Step 5: Inspect -->
       <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 5</span>
-        <button id="btnInspect" class="btn btn-secondary btn-sm" onclick="showTab('connect');document.getElementById('rawInspector').scrollIntoView({behavior:'smooth'});renderInspector()" disabled style="opacity:.4;cursor:not-allowed">&#128269; Inspect data</button>
+        <button id="btnInspect" class="btn btn-secondary btn-sm" onclick="showTab('connect');document.getElementById('rawInspector').scrollIntoView({behavior:'smooth'});renderInspector();S._step5='ok';if(typeof updateProgress==='function')updateProgress();" disabled style="opacity:.4;cursor:not-allowed">&#128269; Inspect data</button>
+        <span id="prog5" class="step-status p-pending" title="Step 5 status">○</span>
       </div>
 
     </div>
@@ -3940,6 +3962,9 @@ function updateCatalogSourcePill(){
   const colB=document.getElementById('step2bCol');
   if(colA) colA.style.opacity=isShopify?'0.55':'1';
   if(colB) colB.style.opacity=isShopify?'1':'0.55';
+  // Toggle changed which 2A/2B path is "active" — refresh dots so the
+  // inactive side flips to "—" (N/A) and the active one shows real status.
+  if(typeof updateProgress==='function') updateProgress();
 }
 async function selectCatalogSource(target){
   if(target!=='cache' && target!=='shopify') return;
@@ -4004,6 +4029,8 @@ function updateWHSourcePill(){
   if(setTitle) setTitle.textContent=isSb
     ? 'WH upload settings — zone filter'
     : 'WH upload settings — column mapping + zone filter';
+  // Refresh the per-step progress dots (4A vs 4B active side may have flipped)
+  if(typeof updateProgress==='function') updateProgress();
 }
 async function selectWHSource(target){
   // Idempotent: clicking the already-active segment manually refreshes that source.
@@ -4695,6 +4722,14 @@ function clog(m){const el=document.getElementById('connLog');el.textContent+='\n
 
 // Step sequencer — unlock buttons as each step completes
 function setStep(step, status){
+  // Map internal step keys to the progress-dot markers used by updateProgress.
+  // Keeps all setStep call sites (loadCatalogFromCache, loadLiveData, processWHRows,
+  // clearWHContents, etc.) automatically syncing the dots without needing per-site edits.
+  const progressMap={1:'_step1','2a':'_step2','2b':'_step3',3:'_step4'};
+  if(progressMap[step]){
+    if(status==='pending') S[progressMap[step]]='pending';
+    else S[progressMap[step]]=status;
+  }
   const colors={ok:'var(--green-bg)',err:'var(--red-bg)',loading:'var(--blue-bg)'};
   const textColors={ok:'var(--green)',err:'var(--red)',loading:'var(--blue)'};
   // Internal keys (1, '2a', '2b', 3, 4) unchanged for stability;
@@ -4738,6 +4773,46 @@ function setStep(step, status){
     }
     if(step===3){buildRecos();renderStoreGrid();}
   }
+  // Refresh the per-column progress dots (1, 2A/2B, 3, 4A/4B, 5)
+  if(typeof updateProgress==='function') updateProgress();
+}
+
+// Per-step progress dots beneath each step column. Driven by:
+//   - testConn status (S._step1='ok'/'err'/'loading')
+//   - S.catalogSource + DATA.length (2A vs 2B)
+//   - DATA.length (3)
+//   - S.whSource + S.wh.length (4A vs 4B)
+//   - S._step5='ok' once user has opened the Inspector
+function updateProgress(){
+  const setDot=(id,status,label)=>{
+    const el=document.getElementById(id);if(!el) return;
+    const cls={pending:'p-pending',loading:'p-loading',ok:'p-ok',err:'p-err',na:'p-na'}[status]||'p-pending';
+    el.className='step-status '+cls;
+    el.textContent={pending:'○',loading:'…',ok:'✓',err:'✗',na:'—'}[status]||'○';
+    el.title=label||('Step '+id.replace('prog','').toUpperCase()+': '+status);
+  };
+  // Step 1 — connection. Locations cached on S.raw means we connected.
+  const conn=S._step1||((S.raw&&S.raw.locations&&S.raw.locations.length)?'ok':'pending');
+  setDot('prog1',conn,'Step 1: '+conn);
+  // Step 2 — catalog. Active path is whichever S.catalogSource points to.
+  // Done when DATA has rows in live mode.
+  const catSrc=S.catalogSource||'cache';
+  const catDone=(DATA.length>0 && S.mode==='live');
+  const catLoading=S._step2==='loading';
+  setDot('prog2a', catSrc==='cache' ? (catDone?'ok':catLoading?'loading':'pending') : 'na', 'Step 2A · '+(catSrc==='cache'?'active':'inactive'));
+  setDot('prog2b', catSrc==='shopify' ? (catDone?'ok':catLoading?'loading':'pending') : 'na', 'Step 2B · '+(catSrc==='shopify'?'active':'inactive'));
+  // Step 3 — live data assembled (DATA[] populated).
+  const liveDone=(DATA.length>0 && S.mode==='live');
+  const liveLoading=S._step3==='loading';
+  setDot('prog3', liveDone?'ok':(liveLoading?'loading':'pending'), 'Step 3: live data');
+  // Step 4 — WH stock. Active path is whichever S.whSource points to.
+  const whSrc=S.whSource||'upload';
+  const whDone=(S.wh&&S.wh.length>0);
+  const whLoading=S._step4==='loading';
+  setDot('prog4a', whSrc==='upload' ? (whDone?'ok':whLoading?'loading':'pending') : 'na', 'Step 4A · '+(whSrc==='upload'?'active':'inactive'));
+  setDot('prog4b', whSrc==='supabase' ? (whDone?'ok':whLoading?'loading':'pending') : 'na', 'Step 4B · '+(whSrc==='supabase'?'active':'inactive'));
+  // Step 5 — Inspect. Marked done when user has opened the inspector at least once.
+  setDot('prog5', S._step5==='ok' ? 'ok' : 'pending', 'Step 5: inspect');
 }
 
 function setConnStatus(msg,cls){document.getElementById('connStatus').innerHTML=`<div class="sb ${cls}" style="margin-top:8px">${msg}</div>`;}
@@ -5055,6 +5130,7 @@ async function shopifyFetch(endpoint){
 async function testConn(){
   saveCredentials();
   document.getElementById('connLog').textContent='Testing...';
+  S._step1='loading';
   setStep(1,'loading');
   try{
     clog('→ Fetching locations...');
@@ -5063,6 +5139,7 @@ async function testConn(){
     locs.forEach(l=>clog('  ✓ '+l.id+': '+l.name+' ('+( l.city||'')+')'));
     setConnStatus('✓ Connected — '+locs.length+' locations.','s-ok');
     {const _b=document.getElementById('modeBadge');if(_b){_b.textContent='Live Shopify POS';_b.className='badge badge-live';}}
+    S._step1='ok';
     setStep(1,'ok');
     // setStep handles unlocking both 2A buttons
     // Also fetch when the catalog cache was last refreshed so user knows what they're loading
@@ -6051,6 +6128,7 @@ document.addEventListener('keydown',e=>{
 // Init
 buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(typeof loadCatalogSource==='function') loadCatalogSource();if(typeof renderWHSettings==='function') renderWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
 if(typeof updateCatalogSourcePill==='function') updateCatalogSourcePill();
+if(typeof updateProgress==='function') updateProgress();
 if(typeof restoreVelTierPanel==='function') restoreVelTierPanel();
 showTab('connect');
 
