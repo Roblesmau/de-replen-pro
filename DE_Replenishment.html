@@ -1252,23 +1252,16 @@ function initCap(){
 }
 
 function buildRecos(){
-  // ── Wipe last run's synthetic gap-fill rows FIRST, unconditionally ──
-  // Synthetic rows (_synthetic:true) are injected later in this function. They must
-  // be cleared at the top of EVERY run — outside the S.wh.length>0 gate — so that
-  // clearing WH (S.wh=[]) or switching source doesn't strand them in DATA, where
-  // they would pollute renderInv capacity/Fill%, dashboard, exports, and simulate.
-  // DATA is now clean for aggOnHand, dataKeys, and every consumer between runs.
-  {
-    const prevLen=DATA.length;
-    DATA=DATA.filter(d=>!d._synthetic);
-    if(DATA.length!==prevLen && typeof bumpDataVersion==='function') bumpDataVersion();
-  }
-  // ── Pre-compute aggregate on-hand per (store, brand, type) ──
-  // DATA is synthetic-free here, so this sums only real rows. (_synthetic guard
-  // kept as a harmless belt-and-suspenders in case future code injects earlier.)
+  // ── Synthetic gap-fill rows live in a LOCAL array, never in DATA ──────────
+  // Gap-fill needs to consider SKUs a store has never stocked (no DATA row). We
+  // fabricate those rows here, but keep them OUT of the global DATA array so that
+  // every DATA consumer (renderInv capacity/Fill%, dashboard, exports, simulate,
+  // impact report) sees only real Shopify inventory. Only this function's reco
+  // loop iterates the synthetic rows, via a transient concat. DATA is never mutated.
+  // ── Pre-compute aggregate on-hand per (store, brand, type) from real DATA ──
   const aggOnHand={}; // key "sid|brand|type" -> sum of real storeQty
   DATA.forEach(d=>{
-    if(d._synthetic) return;
+    if(d._synthetic) return; // defensive — DATA should never contain synthetics now
     const k=d.storeId+'|'+d.brand+'|'+d.type;
     aggOnHand[k]=(aggOnHand[k]||0)+(d.storeQty||0);
   });
@@ -1276,22 +1269,21 @@ function buildRecos(){
   // so multiple SKUs in the same bucket share the same headroom budget.
   const aggUsed={};
 
-  // GAP-FILL: for every WH SKU that has no DATA row at a store,
-  // inject a synthetic row with storeQty=0 so buildRecos can see it.
-  // Rule: inject only if (a) store has capacity > 0 for this brand+type AND
+  // GAP-FILL: for every WH SKU that has no DATA row at a store, build a synthetic
+  // row (storeQty=0) so the reco loop can recommend shipping it for the first time.
+  // Rule: include only if (a) store has capacity > 0 for this brand+type AND
   //        (b) aggregate room (effectiveCap - currentOnHand - alreadyPromised) > 0.
   // The aggregate check prevents over-capacity stores from receiving brand-new SKUs.
+  const synthRows=[];
   if(S.wh.length>0 && S.raw.itemMap && Object.keys(S.raw.itemMap).length){
-    // Build set of existing store+sku combos in DATA. DATA was wiped of synthetic
-    // rows at the top of buildRecos, so every row here is real — no filter needed.
+    // Build set of existing store+sku combos in DATA (all real rows — DATA has no synthetics).
     const dataKeys=new Set(DATA.map(d=>d.storeId+'|'+d.sku.toLowerCase()));
     // Build sku → itemMap entry lookup
     const skuToMeta={};
     Object.values(S.raw.itemMap).forEach(v=>{
       if(v.variantSku) skuToMeta[normSku(v.variantSku).toLowerCase()]={brand:v.brand,type:v.type,desc:v.desc,cost:v.cost};
     });
-    const injected=[];
-    // Track injections per (store, brand, type) so we don't inject more SKUs than
+    // Track injections per (store, brand, type) so we don't add more SKUs than
     // the store can actually accept this run. One unit per injected SKU is the
     // default tier qty for zero-velocity items.
     const injectionsByCombo={};
@@ -1302,7 +1294,7 @@ function buildRecos(){
       if(!meta||meta.brand==='Unknown') return;
       STORES.forEach(st=>{
         const comboKey=st.id+'|'+skuKey;
-        if(dataKeys.has(comboKey)) return; // already in DATA
+        if(dataKeys.has(comboKey)) return; // already stocked at this store
         // Must have base capacity > 0 (store carries this brand+type at all)
         const baseCap=(S.CAP[st.id]&&S.CAP[st.id][meta.brand]&&S.CAP[st.id][meta.brand][meta.type])||0;
         if(baseCap<=0) return;
@@ -1314,7 +1306,7 @@ function buildRecos(){
         const alreadyInjected=injectionsByCombo[cBucket]||0;
         if((effCap-onHand-alreadyInjected)<=0) return; // no aggregate room
         injectionsByCombo[cBucket]=alreadyInjected+1;
-        injected.push({
+        synthRows.push({
           storeId:st.id, store:st.short, city:st.city||'',
           sku:normSku(w.sku), brand:meta.brand, type:meta.type,
           desc:meta.desc, cost:meta.cost,
@@ -1323,14 +1315,6 @@ function buildRecos(){
         });
       });
     });
-    if(injected.length){
-      // Synthetic (gap-fill / new-to-store) rows go FIRST so they claim aggregate room
-      // before under-target real rows. Matches the "new-to-store wins" priority rule —
-      // a store that currently has 0 SKUs gets variety on the shelf before existing
-      // SKUs get top-ups. DATA is already synthetic-free (wiped at top), so plain concat.
-      DATA=injected.concat(DATA);
-      bumpDataVersion();
-    }
   }
 
   // Per-SKU WH availability map — O(1) lookup, no brand+type fallback
@@ -1341,7 +1325,11 @@ function buildRecos(){
   // Inherit Brand/Type filters from Inventory tab — only those flow into replenishment
   const invBrands=getFilterValues('invBrandFilter');
   const invTypes=getFilterValues('invTypeFilter');
-  DATA.forEach(d=>{
+  // Synthetic (new-to-store) rows go FIRST so they claim aggregate room before
+  // under-target real rows ("new-to-store wins" priority). This is a transient
+  // concat — DATA itself is never modified.
+  const scoreRows=synthRows.length ? synthRows.concat(DATA) : DATA;
+  scoreRows.forEach(d=>{
     // Skip if (storeId, sku) is on the exception list
     if(isExcepted(d.storeId,d.sku)) return;
     // Skip if brand/type not in Inventory tab filter selection
