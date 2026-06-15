@@ -5539,12 +5539,26 @@ function buildUnifiedRows(){
   // ── SOURCE 2: PRODUCTS ───────────────────────────────────────────────────
   // itemMap[inventory_item_id] = {variantSku, brand, type, desc, cost}
   const itemMap=S.raw.itemMap||{};
+  // Model = the manufacturer STYLE CODE parsed from the FULL Shopify title
+  // (title format is "SKU - BRAND - <model + color + size>"). Computed from the
+  // untruncated v.desc so codes aren't cut off. The style code is the leading
+  // "0XX####" token (e.g. 0PR 13ZS, 0RB4151, 0PS 01OV). If no code is present
+  // (a few titles use marketing names like "ROUND FULL COLOR"), fall back to the
+  // full after-brand text so nothing is lost.
+  const extractModel=(title)=>{
+    const parts=String(title||'').split(' - ');
+    const after=parts.length>=3 ? parts.slice(2).join(' - ').trim() : '';
+    if(!after) return '';
+    const m=after.match(/\b0[A-Z]{2}\s?\w+/);  // style code, e.g. "0PR 13ZS" or "0RB4151"
+    return m ? m[0] : after;
+  };
   const prodByItemId={};
   Object.entries(itemMap).forEach(([itemId,v])=>{
     if(v.variantSku) prodByItemId[String(itemId)]={
       sku:v.variantSku,
       brand:v.brand||'—',
       type:v.type||'—',
+      model:extractModel(v.desc),
       desc:(v.desc||'').substring(0,40),
       cost:v.cost||0
     };
@@ -5598,6 +5612,7 @@ function buildUnifiedRows(){
       sku:prod.sku,
       brand:prod.brand,
       type:prod.type,
+      model:prod.model,
       description:prod.desc,
       cost:prod.cost,
       // From INVENTORY_LEVELS
@@ -5821,9 +5836,9 @@ function renderInspector(){
     }
     if(!shown.length){document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Load live data first.</div>';return;}
     const hasPYData=(S.raw.ordersPY||[]).length>0;
-    const cols=['store','city','sku','brand','type','description','on_hand','cost','velocity_90d',...(hasPYData?['prior_year_90d','trend_pct']:[])];
-    const colLabels={store:'Store',city:'City',sku:'Variant SKU',brand:'Brand (Vendor)',type:'Type',description:'Description',on_hand:'On Hand',cost:'Cost ($)',velocity_90d:'90d Sales',prior_year_90d:'Prior Year 120d',trend_pct:'Trend %'};
-    const colKey={store:'location_id',city:'city',sku:'inv_item_id→Variant SKU',brand:'sku→products',type:'sku→products',description:'sku→products',on_hand:'inventory.available',cost:'products.cost',velocity_90d:'orders.qty sum',prior_year_90d:'ordersPY.qty sum',trend_pct:'vs prior year'};
+    const cols=['store','city','sku','brand','type','model','description','on_hand','cost','velocity_90d',...(hasPYData?['prior_year_90d','trend_pct']:[])];
+    const colLabels={store:'Store',city:'City',sku:'Variant SKU',brand:'Brand (Vendor)',type:'Type',model:'Model',description:'Description',on_hand:'On Hand',cost:'Cost ($)',velocity_90d:'90d Sales',prior_year_90d:'Prior Year 120d',trend_pct:'Trend %'};
+    const colKey={store:'location_id',city:'city',sku:'inv_item_id→Variant SKU',brand:'sku→products',type:'sku→products',model:'parsed from title',description:'sku→products',on_hand:'inventory.available',cost:'products.cost',velocity_90d:'orders.qty sum',prior_year_90d:'ordersPY.qty sum',trend_pct:'vs prior year'};
     document.getElementById('inspectorTableWrap').innerHTML=`
       <div style="margin-bottom:8px;padding:7px 12px;background:var(--bg);border-radius:6px;font-size:10px;color:var(--muted);border:1px solid var(--border)">
         <strong style="color:var(--text)">Join keys:</strong>
@@ -6157,8 +6172,8 @@ function exportRawTable(table){
     const data=buildUnifiedRows();
     if(!data.length){alert('Load live data first.');return;}
     const hasPYExport=(S.raw.ordersPY||[]).length>0;
-    const cols=['store','city','sku','brand','type','description','on_hand','cost','velocity_90d',...(hasPYExport?['prior_year_90d','trend_pct']:[])];
-    const headers=['Store','City','Variant SKU','Brand (vendor)','Type (product_type)','Description','On Hand','Cost ($)','90d Sales',...(hasPYExport?['Prior Year 120d','Trend %']:[])];
+    const cols=['store','city','sku','brand','type','model','description','on_hand','cost','velocity_90d',...(hasPYExport?['prior_year_90d','trend_pct']:[])];
+    const headers=['Store','City','Variant SKU','Brand (vendor)','Type (product_type)','Model','Description','On Hand','Cost ($)','90d Sales',...(hasPYExport?['Prior Year 120d','Trend %']:[])];
     rows=[headers];
     data.forEach(r=>rows.push(cols.map(c=>r[c]===null||r[c]===undefined?'':r[c])));
     sheetName='Unified Join View';filename='DE_UnifiedJoin_'+dt+'.xlsx';
