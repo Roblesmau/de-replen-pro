@@ -474,7 +474,7 @@
   <button class="tab"        id="tab-dashboard"       onclick="showTab('dashboard')">Dashboard</button>
   <button class="tab"        id="tab-capacity"        onclick="showTab('capacity')">Capacity</button>
   <button class="tab"        id="tab-exceptions"      onclick="showTab('exceptions')">Exceptions</button>
-  <button class="tab"        id="tab-stores"          onclick="showTab('stores')">Store Selection</button>
+  <button class="tab"        id="tab-stores"          onclick="showTab('stores')">Replenishment</button>
   <button class="tab"        id="tab-transfers"       onclick="showTab('transfers')">Transfers</button>
   <button class="tab"        id="tab-recommendations" onclick="showTab('recommendations')" style="display:none">Recommendations</button>
   <button class="tab"        id="tab-nav"             onclick="showTab('nav')" style="display:none">NAV Preview</button>
@@ -3392,7 +3392,12 @@ function exportNAV(recsOverride){
   Object.entries(byStore).forEach(([sid,sd])=>{
     const st=STORES.find(s=>s.id===sid);const loc=document.getElementById(`navLoc-${sid}`)?.value||st?.navLoc||sid;
     const rows=[[`${loc} · Transfer Order · ${dt} · From: ${wh}`],[],['ITEM','No.','Action Message','Accept','Description','Location Code','Original QTY','QTY','Brand','Type','Signal']];
-    sd.lines.forEach(x=>{const sig=x.signals.map(s=>s==='hot'?'Hot Seller':s==='low'?'Low Stock':'Seasonal').join('+');rows.push(['Item',x.sku,act,'Yes',x.desc,loc,'',x.transferQty,x.brand,x.type,sig]);});
+    // Sort lines for the NAV export: Brand asc, then Type asc, then SKU (stable tiebreak)
+    const sortedLines=sd.lines.slice().sort((a,b)=>
+      String(a.brand||'').localeCompare(String(b.brand||''))
+      || String(a.type||'').localeCompare(String(b.type||''))
+      || String(a.sku||'').localeCompare(String(b.sku||'')));
+    sortedLines.forEach(x=>{const sig=x.signals.map(s=>s==='hot'?'Hot Seller':s==='low'?'Low Stock':'Seasonal').join('+');rows.push(['Item',x.sku,act,'Yes',x.desc,loc,'',x.transferQty,x.brand,x.type,sig]);});
     rows.push([`TOTAL LINES: ${sd.lines.length}`,'','','','','','',sd.units,'','','']);rows.push([]);rows.push(['NAV IMPORT: Columns A–H only. I–K are reference.']);
     const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:6},{wch:18},{wch:14},{wch:7},{wch:48},{wch:22},{wch:12},{wch:6},{wch:13},{wch:12},{wch:14}];
     const sheetName=(st?st.short:sid).replace(/[:\/?*\[\]]/g,'').substring(0,31);
