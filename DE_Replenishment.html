@@ -1252,9 +1252,20 @@ function initCap(){
 }
 
 function buildRecos(){
-  // ── Pre-compute aggregate on-hand per (store, brand, type) from REAL DATA rows ──
-  // Synthetic rows have storeQty=0 by construction so we only sum real rows.
-  // This becomes the baseline for room calculations everywhere below.
+  // ── Wipe last run's synthetic gap-fill rows FIRST, unconditionally ──
+  // Synthetic rows (_synthetic:true) are injected later in this function. They must
+  // be cleared at the top of EVERY run — outside the S.wh.length>0 gate — so that
+  // clearing WH (S.wh=[]) or switching source doesn't strand them in DATA, where
+  // they would pollute renderInv capacity/Fill%, dashboard, exports, and simulate.
+  // DATA is now clean for aggOnHand, dataKeys, and every consumer between runs.
+  {
+    const prevLen=DATA.length;
+    DATA=DATA.filter(d=>!d._synthetic);
+    if(DATA.length!==prevLen && typeof bumpDataVersion==='function') bumpDataVersion();
+  }
+  // ── Pre-compute aggregate on-hand per (store, brand, type) ──
+  // DATA is synthetic-free here, so this sums only real rows. (_synthetic guard
+  // kept as a harmless belt-and-suspenders in case future code injects earlier.)
   const aggOnHand={}; // key "sid|brand|type" -> sum of real storeQty
   DATA.forEach(d=>{
     if(d._synthetic) return;
@@ -1271,11 +1282,9 @@ function buildRecos(){
   //        (b) aggregate room (effectiveCap - currentOnHand - alreadyPromised) > 0.
   // The aggregate check prevents over-capacity stores from receiving brand-new SKUs.
   if(S.wh.length>0 && S.raw.itemMap && Object.keys(S.raw.itemMap).length){
-    // Build set of existing store+sku combos in DATA — REAL rows only.
-    // Including synthetic rows from the previous run made injection oscillate:
-    // run N injects, run N+1 sees the stale synthetic combo in dataKeys, skips
-    // re-injection, then wipes the stale row → SKU vanishes → run N+2 injects again.
-    const dataKeys=new Set(DATA.filter(d=>!d._synthetic).map(d=>d.storeId+'|'+d.sku.toLowerCase()));
+    // Build set of existing store+sku combos in DATA. DATA was wiped of synthetic
+    // rows at the top of buildRecos, so every row here is real — no filter needed.
+    const dataKeys=new Set(DATA.map(d=>d.storeId+'|'+d.sku.toLowerCase()));
     // Build sku → itemMap entry lookup
     const skuToMeta={};
     Object.values(S.raw.itemMap).forEach(v=>{
@@ -1318,14 +1327,9 @@ function buildRecos(){
       // Synthetic (gap-fill / new-to-store) rows go FIRST so they claim aggregate room
       // before under-target real rows. Matches the "new-to-store wins" priority rule —
       // a store that currently has 0 SKUs gets variety on the shelf before existing
-      // SKUs get top-ups.
-      DATA=injected.concat(DATA.filter(d=>!d._synthetic));
+      // SKUs get top-ups. DATA is already synthetic-free (wiped at top), so plain concat.
+      DATA=injected.concat(DATA);
       bumpDataVersion();
-    } else {
-      // Still wipe stale synthetic rows from prior runs even if nothing new gets injected
-      const prevLen=DATA.length;
-      DATA=DATA.filter(d=>!d._synthetic);
-      if(DATA.length!==prevLen) bumpDataVersion();
     }
   }
 
