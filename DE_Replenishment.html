@@ -4033,6 +4033,7 @@ function updateWHSourcePill(){
   if(typeof updateProgress==='function') updateProgress();
 }
 async function selectWHSource(target){
+  if(S._pipelineRunning) return;  // load in flight — don't change WH source mid-cascade
   // Idempotent: clicking the already-active segment manually refreshes that source.
   if(S.whSource===target){
     if(target==='supabase' && typeof pullFromInventoryAvailable==='function'){
@@ -4049,6 +4050,7 @@ async function toggleWHSource(){
   await setWHSource(target,{interactive:true});
 }
 async function onClickStep3B(){
+  if(S._pipelineRunning) return;  // load in flight — block manual WH trigger
   // Mutual exclusion: if currently in upload mode with data, confirm before swap.
   // If already in supabase mode, treat the click as a manual refresh.
   if(S.whSource!=='supabase'){
@@ -4827,7 +4829,11 @@ function updateProgress(){
 // via the .pipeline-locked class. Cleared at every terminal outcome of the cascade.
 function setPipelineRunning(running){
   S._pipelineRunning=!!running;
-  ['btnTest','btnCache','btnLoad','catSrcBtnCache','catSrcBtnShopify'].forEach(id=>{
+  // Lock EVERY interactive control on Live Connect while a load runs — catalog
+  // (2A/2B), test, and WH (4A/4B segments + load buttons) — so nothing can change
+  // or restart the flow until it finishes or the page is reloaded.
+  ['btnTest','btnCache','btnLoad','catSrcBtnCache','catSrcBtnShopify',
+   'whSrcBtnUpload','whSrcBtnSupabase','btnWH','btnWHCloudPull','btnWHInvAvail'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.classList.toggle('pipeline-locked',!!running);
   });
