@@ -970,7 +970,7 @@
       <div id="step3aCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 4A &mdash; Upload</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
-          <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch the last uploaded NAV file from Supabase (de_wh_bins)">&#9889; Load from cloud</button>
+          <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch the last uploaded NAV file from Supabase (de_wh_bins) — available after Step 3" style="opacity:.4;pointer-events:none">&#9889; Load from cloud</button>
           <span id="whCloudSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud&hellip;</span>
           <label id="btnWH" class="btn btn-primary btn-sm" style="cursor:pointer;opacity:.4;pointer-events:none">
             &#127981; Upload Bin Contents
@@ -987,7 +987,7 @@
       <div id="step3bCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 4B &mdash; Supabase</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
-          <button id="btnWHInvAvail" class="btn btn-green btn-sm" onclick="onClickStep3B()" title="Read live availability from inventory_available. Auto-refreshes after every Step 3 (Shopify live load).">&#9729; Load from Supabase</button>
+          <button id="btnWHInvAvail" class="btn btn-green btn-sm" onclick="onClickStep3B()" title="Read live availability from inventory_available — available after Step 3. Auto-refreshes after every Step 3 (Shopify live load)." style="opacity:.4;pointer-events:none">&#9729; Load from Supabase</button>
           <span id="whInvAvailSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Not loaded</span>
           <span style="font-size:10px;color:var(--hint);line-height:1.3">Auto-refreshes after Step 3</span>
         </div>
@@ -3856,6 +3856,13 @@ function setWHInvAvailStatus(text,color){
 async function pullFromInventoryAvailable(manual=false){
   const {url,key}=getSBCreds();
   if(!url||!key){ setWHInvAvailStatus('Supabase not configured'); return; }
+  // Guard: a MANUAL pull needs live data (Step 3) so processWHRows can match against
+  // itemMap and update real DATA/S.CAP. Without it the pull would run replenishment on
+  // sample data. Silent/auto pulls (manual=false) still run — they only refresh status.
+  if(manual && S._step3!=='ok'){
+    setWHInvAvailStatus('Load live data (Step 3) first','amber');
+    return;
+  }
   // Server-side filters: only non-zero availability + only allowed locations (Q4=a).
   // Zone filter is applied client-side since sample_zone is a single value per row.
   const filterLocs=(S.whFilter&&S.whFilter.locations)||[];
@@ -4292,6 +4299,13 @@ async function pullWHFromSupabase(manual=false){
     setWHCloudStatus('Checking the cloud…');
     // Creds not yet loaded — clear the "already pulled" flag so the next caller can retry
     S._whCloudPulled=false;
+    return;
+  }
+  // Guard: a MANUAL cloud pull (4A "Load from cloud") needs live data (Step 3) so
+  // processWHRows can match against itemMap and update real DATA. Silent/auto pulls
+  // (manual=false, e.g. boot label refresh + after-Step-3 cascade) still run.
+  if(manual && S._step3!=='ok'){
+    setWHCloudStatus('Load live data (Step 3) first','amber');
     return;
   }
   try{
@@ -4761,9 +4775,9 @@ function setStep(step, status){
       // Turn btn2B green
       const b2b=document.getElementById('btn2B');
       if(b2b){b2b.style.background='var(--green-bg)';b2b.style.color='var(--green)';b2b.style.borderColor='#97C459';b2b.innerHTML='✓ Live data ready<br>Inv · Orders · Prior Year';}
-      // Unlock WH
-      const bwh=document.getElementById('btnWH');
-      if(bwh){bwh.style.opacity='1';bwh.style.pointerEvents='auto';bwh.style.cursor='pointer';}
+      // Unlock all WH actions (4A upload, 4A cloud pull, 4B Supabase) — these need
+      // itemMap (Step 2) + DATA/S.CAP (Step 3) to produce a meaningful plan.
+      ['btnWH','btnWHCloudPull','btnWHInvAvail'].forEach(id=>{const b=document.getElementById(id);if(b){b.style.opacity='1';b.style.pointerEvents='auto';b.style.cursor='pointer';}});
       // Unlock Inspect — removeAttribute + style both needed
       const bi=document.getElementById('btnInspect');
       if(bi){bi.removeAttribute('disabled');bi.disabled=false;bi.style.opacity='1';bi.style.cursor='pointer';bi.style.pointerEvents='auto';}
