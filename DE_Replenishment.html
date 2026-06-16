@@ -4792,27 +4792,27 @@ function updateProgress(){
     el.textContent={pending:'○',loading:'…',ok:'✓',err:'✗',na:'—'}[status]||'○';
     el.title=label||('Step '+id.replace('prog','').toUpperCase()+': '+status);
   };
-  // Step 1 — connection. Locations cached on S.raw means we connected.
-  const conn=S._step1||((S.raw&&S.raw.locations&&S.raw.locations.length)?'ok':'pending');
-  setDot('prog1',conn,'Step 1: '+conn);
-  // Step 2 — catalog. Active path is whichever S.catalogSource points to.
-  // Done when DATA has rows in live mode.
+  // Every dot is driven by the explicit S._stepN markers that setStep() maintains
+  // (setStep maps 1→_step1, '2a'→_step2, '2b'→_step3, 3→_step4). Do NOT derive from
+  // DATA.length / S.mode — S.mode isn't reliably 'live' during the cascade, which left
+  // 2A and 3 stuck on "pending" even after a successful load.
+  const norm=s=>(s==='ok'||s==='loading'||s==='err')?s:'pending';
+  // Step 1 — connection
+  setDot('prog1', norm(S._step1) || (((S.raw&&S.raw.locations&&S.raw.locations.length))?'ok':'pending'), 'Step 1: connection');
+  // Step 2 — catalog (one marker _step2 shared by both 2A and 2B; the active toggle
+  // decides which column shows it, the other shows N/A)
   const catSrc=S.catalogSource||'cache';
-  const catDone=(DATA.length>0 && S.mode==='live');
-  const catLoading=S._step2==='loading';
-  setDot('prog2a', catSrc==='cache' ? (catDone?'ok':catLoading?'loading':'pending') : 'na', 'Step 2A · '+(catSrc==='cache'?'active':'inactive'));
-  setDot('prog2b', catSrc==='shopify' ? (catDone?'ok':catLoading?'loading':'pending') : 'na', 'Step 2B · '+(catSrc==='shopify'?'active':'inactive'));
-  // Step 3 — live data assembled (DATA[] populated).
-  const liveDone=(DATA.length>0 && S.mode==='live');
-  const liveLoading=S._step3==='loading';
-  setDot('prog3', liveDone?'ok':(liveLoading?'loading':'pending'), 'Step 3: live data');
-  // Step 4 — WH stock. Active path is whichever S.whSource points to.
+  const catState=norm(S._step2);
+  setDot('prog2a', catSrc==='cache'   ? catState : 'na', 'Step 2A · '+(catSrc==='cache'?'active':'inactive'));
+  setDot('prog2b', catSrc==='shopify' ? catState : 'na', 'Step 2B · '+(catSrc==='shopify'?'active':'inactive'));
+  // Step 3 — live data
+  setDot('prog3', norm(S._step3), 'Step 3: live data');
+  // Step 4 — WH stock (one marker _step4 shared by both 4A and 4B paths via processWHRows)
   const whSrc=S.whSource||'upload';
-  const whDone=(S.wh&&S.wh.length>0);
-  const whLoading=S._step4==='loading';
-  setDot('prog4a', whSrc==='upload' ? (whDone?'ok':whLoading?'loading':'pending') : 'na', 'Step 4A · '+(whSrc==='upload'?'active':'inactive'));
-  setDot('prog4b', whSrc==='supabase' ? (whDone?'ok':whLoading?'loading':'pending') : 'na', 'Step 4B · '+(whSrc==='supabase'?'active':'inactive'));
-  // Step 5 — Inspect. Marked done when user has opened the inspector at least once.
+  const whState=norm(S._step4) || ((S.wh&&S.wh.length>0)?'ok':'pending');
+  setDot('prog4a', whSrc==='upload'   ? whState : 'na', 'Step 4A · '+(whSrc==='upload'?'active':'inactive'));
+  setDot('prog4b', whSrc==='supabase' ? whState : 'na', 'Step 4B · '+(whSrc==='supabase'?'active':'inactive'));
+  // Step 5 — Inspect (marked done once the inspector has been opened)
   setDot('prog5', S._step5==='ok' ? 'ok' : 'pending', 'Step 5: inspect');
 }
 
