@@ -3979,30 +3979,16 @@ function updateCatalogSourcePill(){
   // inactive side flips to "—" (N/A) and the active one shows real status.
   if(typeof updateProgress==='function') updateProgress();
 }
-async function selectCatalogSource(target){
+function selectCatalogSource(target){
   if(target!=='cache' && target!=='shopify') return;
-  if(S._pipelineRunning) return;  // a load is in flight — don't let a toggle restart it
-  // If already on this source AND data is loaded, treat as manual refresh.
-  // Otherwise switch the preference and fire the matching loader.
-  if(S.catalogSource===target && DATA.length>0){
-    // Manual re-run — confirm to avoid accidental Shopify re-fetch (~5-8 min)
-    if(target==='shopify' && !confirm('Re-run full Shopify load?\n\nThis will re-fetch ~30k variants + products (~5–8 min). Click OK to continue.')) return;
-    if(target==='cache'){
-      if(typeof loadCatalogFromCache==='function') loadCatalogFromCache();
-    } else {
-      if(typeof loadCatalogFromShopify==='function') loadCatalogFromShopify();
-    }
-    return;
-  }
+  if(S._pipelineRunning) return;  // a load is in flight — don't change source mid-load
+  // Toggle sets the PREFERENCE ONLY — it does NOT start a load. This avoids trapping
+  // the user in a 5-8 min Full Shopify load just by toggling, and lets them switch
+  // 2A↔2B freely. The actual load runs when they click the Step 2A/2B button or
+  // Test Connection (whose auto-cascade reads this preference).
   S.catalogSource=target;
   saveCatalogSource();
   updateCatalogSourcePill();
-  // Fire the matching loader (mirrors how 4A/4B's selectWHSource fires its loader)
-  if(target==='cache'){
-    if(typeof loadCatalogFromCache==='function') loadCatalogFromCache();
-  } else {
-    if(typeof loadCatalogFromShopify==='function') loadCatalogFromShopify();
-  }
 }
 function updateWHSourcePill(){
   const isSb=S.whSource==='supabase';
