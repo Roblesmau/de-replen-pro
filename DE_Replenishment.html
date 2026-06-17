@@ -3861,11 +3861,12 @@ function setWHInvAvailStatus(text,color){
 async function pullFromInventoryAvailable(manual=false){
   const {url,key}=getSBCreds();
   if(!url||!key){ setWHInvAvailStatus('Supabase not configured'); return; }
-  // Guard: a MANUAL pull needs live data (Step 3) so processWHRows can match against
-  // itemMap and update real DATA/S.CAP. Without it the pull would run replenishment on
-  // sample data. Silent/auto pulls (manual=false) still run — they only refresh status.
-  if(manual && S._step3!=='ok'){
-    setWHInvAvailStatus('Load live data (Step 3) first','amber');
+  // Guard: NO pull (manual OR auto) runs before Step 3 — processWHRows needs itemMap
+  // + DATA/S.CAP to match, and running it on an empty catalog produces a bogus
+  // "0 matched" result and loads data before the user has even tested the connection.
+  // The after-Step-3 cascade (refreshWHAfterStep2B) passes because _step3 is 'ok' by then.
+  if(S._step3!=='ok'){
+    if(manual) setWHInvAvailStatus('Load live data (Step 3) first','amber');
     return;
   }
   // Server-side filters: only non-zero availability + only allowed locations (Q4=a).
@@ -4295,11 +4296,12 @@ async function pullWHFromSupabase(manual=false){
     S._whCloudPulled=false;
     return;
   }
-  // Guard: a MANUAL cloud pull (4A "Load from cloud") needs live data (Step 3) so
-  // processWHRows can match against itemMap and update real DATA. Silent/auto pulls
-  // (manual=false, e.g. boot label refresh + after-Step-3 cascade) still run.
-  if(manual && S._step3!=='ok'){
-    setWHCloudStatus('Load live data (Step 3) first','amber');
+  // Guard: NO cloud pull (manual OR auto) runs before Step 3 — processWHRows needs
+  // itemMap + DATA to match. Blocks the boot/tab-switch auto-pull that otherwise
+  // processed WH against an empty catalog before Test Connection. The after-Step-3
+  // cascade passes because _step3 is 'ok' by then.
+  if(S._step3!=='ok'){
+    if(manual) setWHCloudStatus('Load live data (Step 3) first','amber');
     return;
   }
   try{
@@ -6337,14 +6339,10 @@ function loadCredentials(){
   if(sbUrl){const el=document.getElementById('sbUrl');if(el) el.value=sbUrl;}
   if(sbKey){const el=document.getElementById('sbKey');if(el) el.value=sbKey;}
   if(token){
-    document.getElementById('connLog').textContent='Credentials loaded from previous session. Click Test Connection to verify before loading data.';
-    // Unlock 2A buttons — but do NOT mark Step 1 green; user must test connection explicitly
-    ['btnLoad','btnCache'].forEach(id=>{
-      const b=document.getElementById(id);
-      if(b){b.disabled=false;b.style.opacity='1';b.style.cursor='pointer';}
-    });
-    const bwh=document.getElementById('btnWH');
-    if(bwh){bwh.style.opacity='1';bwh.style.pointerEvents='auto';bwh.style.cursor='pointer';}
+    document.getElementById('connLog').textContent='Credentials loaded from previous session. Click Test Connection to begin.';
+    // Do NOT unlock the Step 2/4 buttons here — they stay disabled until Test
+    // Connection succeeds (setStep(1,'ok') unlocks 2A/2B; Step 3 unlocks the WH
+    // buttons). Nothing should load or process before the user tests the connection.
   }
 }
 loadCredentials();
