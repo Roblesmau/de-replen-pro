@@ -5076,7 +5076,7 @@ async function loadCatalogFromCache(){
       setProgress(Math.min(55,5+Math.round(offset/(cacheCount||1)*50)));
       const rows=await sbFetch('/de_products?select=*&order=inventory_item_id&limit='+pageSize+'&offset='+offset);
       if(!rows||!rows.length) break;
-      rows.forEach(r=>{itemMap[r.inventory_item_id]={variantSku:r.variant_sku,brand:r.brand,type:r.type,desc:r.title,cost:parseFloat(r.price)||0,barcode:r.barcode||'',model:r.model||'',color:r.product_color_code||'',size:r.size||'',upc:r.upc||''};});
+      rows.forEach(r=>{itemMap[r.inventory_item_id]={variantSku:r.variant_sku,brand:r.brand,type:r.type,desc:r.title,cost:parseFloat(r.price)||0,barcode:r.barcode||'',model:r.model||'',color:r.product_color_code||'',size:r.size||'',upc:r.upc||'',erpBrand:r.erp_brand||'',erpType:r.erp_type||''};});
       offset+=rows.length;
       clog('    loaded '+offset+' of '+cacheCount+'...');
       if(rows.length<pageSize) break;
@@ -5591,6 +5591,8 @@ function buildUnifiedRows(){
       sku:v.variantSku,
       brand:v.brand||'—',
       type:v.type||'—',
+      erpBrand:v.erpBrand||'',
+      erpType:v.erpType||'',
       model:v.model||extractModel(v.desc),
       color:v.color||'',
       size:v.size||'',
@@ -5648,6 +5650,8 @@ function buildUnifiedRows(){
       sku:prod.sku,
       brand:prod.brand,
       type:prod.type,
+      erp_brand:prod.erpBrand,
+      erp_type:prod.erpType,
       model:prod.model,
       color:prod.color,
       size:prod.size,
@@ -5875,9 +5879,9 @@ function renderInspector(){
     }
     if(!shown.length){document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Load live data first.</div>';return;}
     const hasPYData=(S.raw.ordersPY||[]).length>0;
-    const cols=['store','city','sku','brand','type','model','color','size','upc','description','on_hand','cost','velocity_90d',...(hasPYData?['prior_year_90d','trend_pct']:[])];
-    const colLabels={store:'Store',city:'City',sku:'Variant SKU',brand:'Brand (Vendor)',type:'Type',model:'Model',color:'Color',size:'Size',upc:'UPC',description:'Description',on_hand:'On Hand',cost:'Cost ($)',velocity_90d:'90d Sales',prior_year_90d:'Prior Year 120d',trend_pct:'Trend %'};
-    const colKey={store:'location_id',city:'city',sku:'inv_item_id→Variant SKU',brand:'sku→products',type:'sku→products',model:'ERP master',color:'ERP master',size:'ERP master',upc:'ERP master',description:'sku→products',on_hand:'inventory.available',cost:'products.cost',velocity_90d:'orders.qty sum',prior_year_90d:'ordersPY.qty sum',trend_pct:'vs prior year'};
+    const cols=['store','city','sku','brand','type','erp_brand','erp_type','model','color','size','upc','description','on_hand','cost','velocity_90d',...(hasPYData?['prior_year_90d','trend_pct']:[])];
+    const colLabels={store:'Store',city:'City',sku:'Variant SKU',brand:'Brand (Vendor)',type:'Type',erp_brand:'Brand (ERP)',erp_type:'Type (ERP)',model:'Model',color:'Color',size:'Size',upc:'UPC',description:'Description',on_hand:'On Hand',cost:'Cost ($)',velocity_90d:'90d Sales',prior_year_90d:'Prior Year 120d',trend_pct:'Trend %'};
+    const colKey={store:'location_id',city:'city',sku:'inv_item_id→Variant SKU',brand:'sku→products',type:'sku→products',erp_brand:'ERP master',erp_type:'ERP master',model:'ERP master',color:'ERP master',size:'ERP master',upc:'ERP master',description:'sku→products',on_hand:'inventory.available',cost:'products.cost',velocity_90d:'orders.qty sum',prior_year_90d:'ordersPY.qty sum',trend_pct:'vs prior year'};
     document.getElementById('inspectorTableWrap').innerHTML=`
       <div style="margin-bottom:8px;padding:7px 12px;background:var(--bg);border-radius:6px;font-size:10px;color:var(--muted);border:1px solid var(--border)">
         <strong style="color:var(--text)">Join keys:</strong>
@@ -6211,8 +6215,8 @@ function exportRawTable(table){
     const data=buildUnifiedRows();
     if(!data.length){alert('Load live data first.');return;}
     const hasPYExport=(S.raw.ordersPY||[]).length>0;
-    const cols=['store','city','sku','brand','type','model','color','size','upc','description','on_hand','cost','velocity_90d',...(hasPYExport?['prior_year_90d','trend_pct']:[])];
-    const headers=['Store','City','Variant SKU','Brand (vendor)','Type (product_type)','Model','Color','Size','UPC','Description','On Hand','Cost ($)','90d Sales',...(hasPYExport?['Prior Year 120d','Trend %']:[])];
+    const cols=['store','city','sku','brand','type','erp_brand','erp_type','model','color','size','upc','description','on_hand','cost','velocity_90d',...(hasPYExport?['prior_year_90d','trend_pct']:[])];
+    const headers=['Store','City','Variant SKU','Brand (vendor)','Type (product_type)','Brand (ERP)','Type (ERP)','Model','Color','Size','UPC','Description','On Hand','Cost ($)','90d Sales',...(hasPYExport?['Prior Year 120d','Trend %']:[])];
     rows=[headers];
     data.forEach(r=>rows.push(cols.map(c=>r[c]===null||r[c]===undefined?'':r[c])));
     sheetName='Unified Join View';filename='DE_UnifiedJoin_'+dt+'.xlsx';
