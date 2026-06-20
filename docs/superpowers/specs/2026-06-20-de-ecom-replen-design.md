@@ -34,7 +34,12 @@ owned by the data-warehouse/Microsoft/python jobs.
 
 | # | System | Owner | In this spec? |
 |---|--------|-------|---------------|
-| 1 | Ingestion pipelines: NAV/SQL DWH → Supabase; SaaS demand sources (GA4, Keepa, Vendorati, Helium 10, SmartScout, Sellerboard) → Supabase | DWH / python / Microsoft | No (external) |
+| 1 | Ingestion pipelines: NAV/SQL DWH → Supabase; **ERP open purchase orders (SQL Server → python → Task Scheduler → Supabase)**; SaaS demand sources (GA4, Keepa, Vendorati, Helium 10, SmartScout, Sellerboard) → Supabase | DWH / python / Microsoft | No (external) |
+
+> **"SQL Server" = the ERP databases.** Designer Eyes' ERP (NAV) lives on an in-house SQL
+> Server. The open-orders feed (and any other ERP-sourced data) is pulled by a python job on
+> Windows Task Scheduler and pushed to Supabase. The app only reads the resulting Supabase
+> table — it never connects to SQL Server directly.
 | 2 | Supabase data contract (tables the app reads) | Defined here; bootstrapped by Claude | Schema only |
 | 3 | **DE Ecom Replen app** (single-file HTML) | This spec | **Yes** |
 
@@ -86,6 +91,19 @@ period_date, units, revenue, synced_at`. The SaaS connectors populate it later; 
 forecast auto-upgrades to seasonality once enough history exists. **No app feature depends on
 it being populated at launch.**
 
+### 3.5 `ecom_open_orders` — NEW (open vendor POs, in-transit from supplier)
+Sourced from the **ERP on SQL Server** by a python job on Task Scheduler → Supabase. Gives
+line-level visibility into incoming vendor stock (richer than the flat `ecom_oor` rollup).
+PK `(po_no, po_line)`; indexed on `item_no`. Columns: `po_no, po_line, item_no, vendor_name,
+qty_ordered, qty_received, qty_outstanding, order_date, expected_receipt_date, destination
+(amazon|walmart|de_wh|…), status, synced_at`.
+
+- The app reads this table when present and aggregates `qty_outstanding` per `item_no` as the
+  authoritative **vendor open-order** quantity, with `expected_receipt_date` enabling
+  time-phased coverage (§5).
+- **Graceful fallback:** if the table is empty/absent, the app falls back to
+  `ecom_inventory.ecom_oor`. No app feature hard-depends on it at launch.
+
 ### 3.4 `app_settings` — exists (`key, value jsonb, updated_at, updated_by`)
 Optional cloud sync of **shared, non-secret** default parameters (forecast model, lead times,
 coverage targets). Secrets never go here — they stay in the browser.
@@ -130,8 +148,18 @@ available = ecom_pickable_bins
 
 **On-order / in pipeline (units arriving, not yet sellable):**
 ```
-on_order = ecom_oor + ecz_inbound + ecz_awd_inbound + vcs_inbound + vcs_awd_inbound
+vendor_open = Σ ecom_open_orders.qty_outstanding by item_no   # ERP feed; fallback ecom_oor
+marketplace_inbound = ecz_inbound + ecz_awd_inbound + vcs_inbound + vcs_awd_inbound
+on_order = vendor_open + marketplace_inbound
 ```
+- **Vendor open orders** = POs already placed and in transit from the supplier. Counting them
+  prevents re-ordering stock that's already coming. Prefer the line-level `ecom_open_orders`
+  feed; fall back to the flat `ecom_oor` when the feed is absent.
+- **Time-phasing (when `expected_receipt_date` is present):** a PO expected to arrive *before*
+  the projected stockout counts toward covering near-term demand and clears the stockout flag;
+  a PO arriving *after* the horizon still reduces `reorder_need` but does **not** clear a
+  near-term stockout risk. Without dates, all `on_order` is treated as covering the horizon
+  (simple mode).
 
 > **Double-count guard:** `*_fba_awd_total` and `*_awd_total` are roll-ups that bundle AWD
 > *inbound* together with available stock. The split above deliberately uses the leaf fields
@@ -183,7 +211,9 @@ one-time parse), optionally Chart.js (dashboard).
    vendor, category, product type, listing status, account destination; text search; column
    visibility presets; export current view. Sticky header, `.table-scroll`.
 3. **Forecast & Coverage** — per item: rates by window, model output, trend pill,
-   weekly demand, available, on-order, weeks of supply, coverage status. Honors filters.
+   weekly demand, available, on-order (split: vendor-open vs marketplace-inbound), nearest
+   open-PO ETA, weeks of supply, coverage status. Honors filters. Expandable row shows the
+   item's open `ecom_open_orders` lines (PO #, qty outstanding, expected receipt, destination).
 4. **Suggested Purchase** — reorder list grouped by vendor (§5). Editable qty before export.
 5. **Dashboard** — KPIs: # at stockout risk, # to reorder, total reorder units & value,
    coverage distribution, top vendors by reorder value. (Chart.js.)
