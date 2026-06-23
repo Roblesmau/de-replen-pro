@@ -141,6 +141,43 @@ alter table public.ecom_sales_history enable row level security;
 create policy ecr_inv_read  on public.ecom_inventory   for select to anon using (true);
 create policy ecr_oo_read   on public.ecom_open_orders for select to anon using (true);
 create policy ecr_sh_read   on public.ecom_sales_history for select to anon using (true);
+
+-- mau_main_items is the BASE; ensure anon can read it (add policy only if RLS is enabled)
+do $$
+begin
+  if exists (select 1 from pg_tables where schemaname='public' and tablename='mau_main_items'
+             and rowsecurity=true)
+     and not exists (select 1 from pg_policies where schemaname='public'
+                     and tablename='mau_main_items' and policyname='ecr_mmi_read') then
+    create policy ecr_mmi_read on public.mau_main_items for select to anon using (true);
+  end if;
+end $$;
+
+-- v_replen_base: master (BASE) LEFT JOIN e-com data + aggregated open orders, server-side
+create or replace view public.v_replen_base as
+select m.item_no, m.upc, m.brand_name, m.model, m.product_color_code, m.size,
+       m.product_group_code, m.item_category_code, m.description,
+       e.account_destination, e.ecz_listing_status, e.vcs_listing_status, e.asin,
+       e.gender, e.item_category, e.product_type, e.vendor_name, e.exclusivity,
+       e.ecom_oor, e.ecom_pickable_bins, e.pickable_sunrise_inventory,
+       e.ecz_fba_total, e.ecz_awd_available, e.ecz_awd_inbound, e.ecz_inbound,
+       e.ecz_fba_plus_awd_total, e.vcs_fba_total, e.vcs_awd_available, e.vcs_awd_inbound,
+       e.vcs_inbound, e.tpl_inventory_total, e.retail_pickable_bins,
+       e.total_on_hand_qty, e.ecom_on_hand_qty,
+       e.direct_cost, e.us_map_price, e.us_min_price, e.us_max_price,
+       e.vcs_7d, e.vcs_15d, e.vcs_30d, e.vcs_60d, e.vcs_90d,
+       e.ecz_7d, e.ecz_15d, e.ecz_30d, e.ecz_60d, e.ecz_90d,
+       e.amz_description,
+       coalesce(oo.vendor_open, 0) as vendor_open, oo.next_eta,
+       (e.item_no is not null) as has_ecom
+from public.mau_main_items m
+left join public.ecom_inventory e on e.item_no = m.item_no
+left join (
+  select item_no, sum(qty_outstanding) as vendor_open, min(expected_receipt_date) as next_eta
+  from public.ecom_open_orders group by item_no
+) oo on oo.item_no = m.item_no;
+
+grant select on public.v_replen_base to anon;
 ```
 
 - [ ] **Step 2: Verify tables exist**
@@ -160,6 +197,17 @@ select count(*) from information_schema.columns
 where table_schema='public' and table_name='ecom_inventory';
 ```
 Expected: `99` (98 data columns + `synced_at`).
+
+- [ ] **Step 4: Verify the view exists and anon can read it**
+
+Run MCP `execute_sql`:
+```sql
+select count(*) as base_rows, count(*) filter (where has_ecom) as ecom_rows
+from public.v_replen_base;
+```
+Expected before bootstrap: `base_rows` ≈ 337,276, `ecom_rows` = 0.
+After Task 2 bootstrap, re-run: `ecom_rows` ≈ 20k. (If `v_replen_base` errors on `has_ecom`,
+the view didn't create — re-apply the migration.)
 
 ---
 
@@ -560,19 +608,25 @@ git commit -m "DE Ecom Replen: Supabase fetch layer and Test connection"
 
 ## Phase 2 — Data load & state
 
-### Task 6: loadData() — fetch inventory + open orders, build S.DATA
+### Task 6: loadData() — smart load (master base) + open orders + unmatched list
 
 **Files:**
 - Modify: `DE_Ecom_Replen.html` (add `ECR.loadData`, `ECR.recompute` stub)
 
-- [ ] **Step 1: Add paginated load + open-order aggregation**
+Baseline = `mau_main_items` (337k), so the app does NOT load it all. It loads the
+**actionable working set** from `v_replen_base` (rows with e-com data OR an open order),
+fetches open-order lines for the detail/fallback, and builds the **unmatched e-com list**
+(e-com SKUs absent from the master) for the data-quality report. The ~300k non-selling master
+items are browsed server-side later (Task 10), not preloaded.
+
+- [ ] **Step 1: Add smart load + open-order aggregation + unmatched list**
 
 ```javascript
-ECR.fetchAll = async function(table, selectCols){
+ECR.fetchPaged = async function(pathBase){
   const PAGE=1000; let from=0, out=[];
   while(true){
-    const path = table+'?select='+selectCols+'&order=item_no.asc&limit='+PAGE+'&offset='+from;
-    const d = await ECR.sbFetch(path) || [];
+    const sep = pathBase.indexOf('?')>=0 ? '&' : '?';
+    const d = await ECR.sbFetch(pathBase+sep+'limit='+PAGE+'&offset='+from) || [];
     out = out.concat(d);
     if(d.length < PAGE) break;
     from += PAGE;
@@ -580,37 +634,57 @@ ECR.fetchAll = async function(table, selectCols){
   return out;
 };
 ECR.loadData = async function(){
-  const msg=ECR.getEl('connMsg'); msg.textContent='Loading inventory…';
+  const msg=ECR.getEl('connMsg'); msg.textContent='Loading actionable items…';
   try{
-    const inv = await ECR.fetchAll('ecom_inventory','*');
+    // 1) actionable working set from the master-based view (has e-com data OR an open order)
+    const inv = await ECR.fetchPaged('v_replen_base?select=*&or=(has_ecom.eq.true,vendor_open.gt.0)&order=item_no.asc');
+    // 2) open-order lines for per-item detail + onOrder fallback (tolerate empty/missing)
     msg.textContent='Loading open orders…';
-    // open orders: tolerate empty/missing table
-    let oo=[]; try{ oo = await ECR.fetchAll('ecom_open_orders','*'); }catch(e){ oo=[]; }
+    let oo=[]; try{ oo = await ECR.fetchPaged('ecom_open_orders?select=*&order=item_no.asc'); }catch(e){ oo=[]; }
     ECR.S.openByItem = {};
     oo.forEach(o=>{ const k=o.item_no; if(!k) return; (ECR.S.openByItem[k]=ECR.S.openByItem[k]||[]).push(o); });
+    // 3) data-quality: e-com SKUs NOT in the master (left-join-anti via PostgREST)
+    msg.textContent='Checking unmatched e-com items…';
+    let unmatched=[];
+    try{
+      // ecom_inventory rows whose item_no has no master row: use a NOT-in filter in chunks
+      const masterIds = new Set(inv.map(r=>r.item_no));
+      const allEcom = await ECR.fetchPaged('ecom_inventory?select=item_no,asin,brand_name,amz_description,ecz_90d,vcs_90d,total_on_hand_qty&order=item_no.asc');
+      unmatched = allEcom.filter(r=>!masterIds.has(r.item_no));
+    }catch(e){ unmatched=[]; }
     ECR.S.DATA = inv;
+    ECR.S.unmatched = unmatched;
     ECR.S.loadedAt = new Date();
     ECR.buildParams();
     ECR.recompute();
-    msg.textContent = `Loaded ${inv.length} items, ${oo.length} open-order lines ✓`;
+    msg.textContent = `Loaded ${inv.length} actionable items · ${oo.length} open-order lines · ${unmatched.length} unmatched e-com ✓`;
   }catch(e){ msg.textContent='Load failed: '+e.message; }
 };
-ECR.recompute = function(){ /* filled in Task 11 (renders tabs) */ };
+ECR.recompute = function(){ /* filled in Task 10 (renders tabs) */ };
 ```
 
-- [ ] **Step 2: Verify load count**
+> **Note on the unmatched check:** the working set is the *intersection* (e-com items that
+> exist in the master). `unmatched` = e-com items in `ecom_inventory` whose `item_no` is not in
+> that intersection — i.e. absent from the master. This is computed client-side by diffing the
+> full `ecom_inventory` id list against the loaded master-matched ids. It is the data-quality
+> report; those items are intentionally NOT in `S.DATA` (strict master base).
+
+- [ ] **Step 2: Verify load counts**
 
 `preview_eval` (after setting key + Test connection):
 ```js
 await ECR.loadData();
-({items:ECR.S.DATA.length, sample:ECR.S.DATA[0] && ECR.S.DATA[0].item_no, oo:Object.keys(ECR.S.openByItem).length});
+({actionable:ECR.S.DATA.length, sample:ECR.S.DATA[0] && ECR.S.DATA[0].item_no,
+  oo:Object.keys(ECR.S.openByItem).length, unmatched:ECR.S.unmatched.length,
+  hasEcom:ECR.S.DATA[0] && ECR.S.DATA[0].has_ecom});
 ```
-Expected: `items` ≈ 20,689, a non-empty `sample`, `oo` ≥ 0.
+Expected: `actionable` ≈ 20k (e-com items present in master), non-empty `sample`,
+`unmatched` ≥ 1 (e.g. item 367906), `hasEcom` true.
 
 - [ ] **Step 3: Commit**
 ```bash
 git add DE_Ecom_Replen.html
-git commit -m "DE Ecom Replen: paginated Supabase load + open-order aggregation"
+git commit -m "DE Ecom Replen: smart load from v_replen_base + unmatched e-com list"
 ```
 
 ---
@@ -884,8 +958,46 @@ Wire into `ECR.recompute` and tab switch:
 ECR.recompute = function(){ ECR.renderReport(); ECR.renderForecast && ECR.renderForecast(); ECR.renderPurchase && ECR.renderPurchase(); ECR.renderDashboard && ECR.renderDashboard(); };
 ```
 
+- [ ] **Step 1b: Add inspector (Unmatched e-com report) + catalog-browse toggle**
+
+Add an inspector `<select>` to the report header and two helpers. The Unmatched view reads
+`ECR.S.unmatched` (built in Task 6). The catalog-browse toggle fetches master-only rows
+server-side on demand (not preloaded). Add inside the report-header card markup:
+`<select id="rf_view" onchange="ECR.renderReport()"><option value="working">Working set</option><option value="unmatched">⚠ Unmatched e-com items</option></select>`
+`<label><input type="checkbox" id="rf_catalog" onchange="ECR.toggleCatalog()"> Show non-selling catalog items</label>`
+
+```javascript
+ECR.toggleCatalog = async function(){
+  const on = ECR.getEl('rf_catalog').checked;
+  if(on && !ECR.S._catalogLoaded){
+    const msg=ECR.getEl('connMsg'); if(msg) msg.textContent='Loading non-selling catalog items…';
+    // master items with no e-com data, server-side; cap to keep the tab responsive
+    const cat = await ECR.fetchPaged('v_replen_base?select=*&has_ecom=is.false&vendor_open=eq.0&order=item_no.asc');
+    ECR.S._catalog = cat; ECR.S._catalogLoaded = true;
+    if(msg) msg.textContent='Loaded '+cat.length+' catalog-only items ✓';
+  }
+  ECR.renderReport();
+};
+ECR.reportSource = function(){
+  if(ECR.getEl('rf_view') && ECR.getEl('rf_view').value==='unmatched') return ECR.S.unmatched||[];
+  let base = ECR.S.DATA;
+  if(ECR.getEl('rf_catalog') && ECR.getEl('rf_catalog').checked && ECR.S._catalog) base = base.concat(ECR.S._catalog);
+  return base;
+};
+```
+Then change `ECR.filteredData` to read `ECR.reportSource()` instead of `ECR.S.DATA`, and in
+`renderReport` switch columns to an unmatched-specific set when the view is `unmatched`:
+```javascript
+ECR.UNMATCHED_COLS = [['item_no','Item','txt'],['asin','ASIN','txt'],['brand_name','Brand','txt'],
+  ['amz_description','Description','txt'],['ecz_90d','ECZ 90d',''],['vcs_90d','VCS 90d',''],['total_on_hand_qty','Total OH','']];
+// in renderReport: const cols = (ECR.getEl('rf_view')&&ECR.getEl('rf_view').value==='unmatched') ? ECR.UNMATCHED_COLS : ECR.REPORT_COLS;
+// use `cols` for header + body + export. When unmatched and count>0, show a red banner:
+//   "<N> e-com SKUs are not in mau_main_items — add them to the master upstream."
+```
+
 - [ ] **Step 2: Verify** — `preview_eval` `await ECR.loadData()`, `ECR.showTab('report')`, `preview_snapshot`.
 Expected: filter dropdowns populated, table renders, item count shown. Change a brand filter → row count drops.
+Switch inspector to "Unmatched e-com items" → shows `ECR.S.unmatched` rows + red banner (item 367906 present). Toggle "Show non-selling catalog items" → row count jumps as master-only items load.
 
 - [ ] **Step 3: Commit**
 ```bash
@@ -1097,17 +1209,29 @@ Vercel: this is a separate static file. Either add to an existing project or new
 ## Self-Review (completed by plan author)
 
 **Spec coverage:**
-- §3.1–3.5 tables → Task 1 (DDL) + Task 2 (bootstrap). ✓
+- §3.1 `mau_main_items` as BASE + §3.2b `v_replen_base` view + smart load → Task 1 (view DDL + grants) + Task 6 (actionable working-set load, server-side catalog browse). ✓
+- §3.2–3.5 tables → Task 1 (DDL) + Task 2 (bootstrap). ✓
 - §4 forecast (smoothed/recent/conservative + trend, seasonality deferred) → Task 7. Seasonality intentionally not built (spec defers it; `ecom_sales_history` table created, unused). ✓
 - §5 coverage, two-leg lead, reorder math, flags, AWD double-count guard → Tasks 8–9 (available uses leaf fields `fba_total`+`awd_available`, onOrder uses `*_inbound` — no overlap). ✓
 - §5 time-phasing (ETA) → surfaced in Task 11 (Next ETA column); full before/after-stockout phasing is represented by showing ETA + stockout flag. NOTE: deeper date-vs-stockout gating is simplified to "show ETA + flag" per simple-mode default; acceptable for v1. ✓ (documented limitation)
 - §6 tabs (Setup/Report/Forecast/Purchase/Dashboard) → Tasks 3,4,10,11,12,13. ✓
+- §6 Report: catalog-browse toggle + "⚠ Unmatched e-com items" data-quality report → Task 6 (builds `S.unmatched`) + Task 10 Step 1b. ✓
 - §7 Setup secrets + params persisted (`ecr_` keys), future SaaS fields inert → Task 4. ✓
 - §8 read-only, export-only, no pipeline build → respected (only one-time bootstrap script writes, via service_role). ✓
-- §9 risks: UPC join (we key on item_no, mau_main_items enrichment deferred — NOT yet wired; see gap below), cumulative windows (rates use window length), single-snapshot (no fake seasonality), batch 1000 (loader). 
+- §9 risks: UPC join (we key on item_no; master is base), cumulative windows (rates use window length), single-snapshot (no fake seasonality), batch 1000 (loader), 337k load avoided via smart load. ✓
 
-**Gaps found & resolved:**
-- `mau_main_items` enrichment (model/color/size) named in spec §3.1/§6 but no task used it. Resolution: v1 Report shows ecom_inventory's own attributes (brand/desc/category/vendor) which are sufficient for the report and PO; model/color/size enrichment is deferred and not required by any KPI or PO calc. Flagged here as a deliberate v1 cut, not an omission. If Mau wants it, add a join task fetching `mau_main_items?select=item_no,model,product_color_code,size` and merging by `item_no`.
+**Decisions reflected (master-as-base revision):**
+- Baseline = `mau_main_items` (337k), strict left-join of e-com data via `v_replen_base`.
+  model/color/size enrichment now comes from the base view (no longer a deferred cut).
+- E-com items absent from the master (e.g. 367906) are excluded from `S.DATA` and surfaced in
+  the Unmatched report (Task 6 + Task 10 Step 1b) — the data-quality governance Mau asked for.
+- 337k never fully loaded: actionable set (~20k) loaded fully; non-selling catalog browsed
+  server-side on toggle.
+
+**Engine input note:** `v_replen_base` exposes every field the engine reads
+(`ecz_fba_total`, `ecz_awd_available`, `vcs_fba_total`, `vcs_awd_available`, `*_inbound`,
+`ecom_pickable_bins`, `pickable_sunrise_inventory`, `tpl_inventory_total`, sales windows,
+`direct_cost`), so `S.DATA` rows from the view are valid engine inputs unchanged. ✓
 
 **Placeholder scan:** none — all steps contain runnable code/SQL/commands.
 

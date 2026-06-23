@@ -53,10 +53,19 @@ app change.
 
 Project: `zoqihptkwurpqenpjgfw` (shared with DE Replen Pro).
 
-### 3.1 `mau_main_items` — exists (product master, 337,276 rows)
+### 3.1 `mau_main_items` — exists (product master, 337,276 rows) — **THE BASELINE**
 PK `item_no`. Columns: `item_no, upc, no_2, description_3, description, model,
 product_color_code, size, product_group_code, item_category_code, brand_name, synced_at`.
-Used to enrich the report (model/color/size) by `item_no`, fallback `upc`.
+
+**This is the base / row driver.** Every other feed left-joins onto it by `item_no`. The
+item universe of the tool is the master; e-com stock/sales/forecast/open-orders are
+*attached* to master items. Items in the master with no e-com data simply show blank e-com
+columns (and no forecast/PO).
+
+**Data-quality rule:** every e-com item *should* exist in the master. E-com items absent from
+`mau_main_items` (e.g. item `367906`) are treated as a defect: they are **excluded from the
+working set** (strict left-join from master) **and surfaced in the "Unmatched e-com items"
+report** (§6) so they get added to the master upstream. Nothing is silently merged in.
 
 ### 3.2 `ecom_inventory` — NEW (the report data)
 PK `item_no`. Mirrors the ~98 ECOM columns from the Excel `ECOM` sheet, normalized to
@@ -83,6 +92,34 @@ external sync. Key column groups:
 - **Dates:** `amz_refreshing_date`, `report_generation_date`, `synced_at`.
 
 > Excel serial dates (e.g. `46190.96…`) are converted to ISO timestamps on load.
+
+### 3.2b `v_replen_base` — NEW (server-side join view) + smart load
+Because the master is 337,276 rows, the app does **not** load it all into the browser. A
+Postgres **view** does the join server-side; the app loads only what it needs.
+
+```sql
+create or replace view public.v_replen_base as
+select m.item_no, m.upc, m.brand_name, m.model, m.product_color_code, m.size,
+       m.product_group_code, m.item_category_code, m.description,
+       e.*,                               -- all ecom_inventory columns (e.item_no may be null)
+       oo.vendor_open, oo.next_eta,        -- aggregated open orders
+       (e.item_no is not null) as has_ecom
+from public.mau_main_items m
+left join public.ecom_inventory e on e.item_no = m.item_no
+left join (
+  select item_no, sum(qty_outstanding) as vendor_open, min(expected_receipt_date) as next_eta
+  from public.ecom_open_orders group by item_no
+) oo on oo.item_no = m.item_no;
+```
+
+**Load strategy (smart):**
+- **Actionable working set (loaded fully, ~20–35k):** rows where `has_ecom` is true OR
+  `vendor_open > 0` — i.e. anything with sales, stock, or an open PO. Forecast/coverage/PO
+  run only here. Query: `v_replen_base?or=(has_ecom.eq.true,vendor_open.gt.0)`.
+- **Catalog browse (server-side, ~300k):** master items with no e-com data are **not**
+  preloaded. A "Show non-selling catalog items" toggle browses them via server-side
+  paginated/filtered queries on `v_replen_base` (no forecast needed — they have no demand).
+- Both paths read `&order=item_no` for stable pagination (DE Replen Pro lesson).
 
 ### 3.3 `ecom_sales_history` — NEW (empty for now)
 Time series stub for genuine seasonality. PK `(item_no, source, period_date)`.
@@ -207,9 +244,15 @@ one-time parse), optionally Chart.js (dashboard).
 
 **Tabs:**
 1. **Setup** — credentials + parameters (see §7).
-2. **Report** — the full `ecom_inventory` grid joined to `mau_main_items`. Filter by brand,
-   vendor, category, product type, listing status, account destination; text search; column
-   visibility presets; export current view. Sticky header, `.table-scroll`.
+2. **Report** — grid over `v_replen_base` (master ⟕ e-com). Defaults to the **actionable
+   working set**; a **"Show non-selling catalog items"** toggle adds the ~300k master-only
+   rows via server-side pagination. Filter by brand, vendor, category, product type, listing
+   status, account destination; text search; column visibility presets; export current view.
+   Sticky header, `.table-scroll`. Includes an inspector dropdown with a **"⚠ Unmatched
+   e-com items"** view: e-com SKUs present in `ecom_inventory` but **absent from
+   `mau_main_items`** (query: `ecom_inventory` left-join master where master `item_no` is
+   null). Shows item_no, ASIN, brand, sales, on-hand; downloadable to Excel; auto-shown when
+   count > 0. This is the data-quality report that drives fixing the master upstream.
 3. **Forecast & Coverage** — per item: rates by window, model output, trend pill,
    weekly demand, available, on-order (split: vendor-open vs marketplace-inbound), nearest
    open-PO ETA, weeks of supply, coverage status. Honors filters. Expandable row shows the
