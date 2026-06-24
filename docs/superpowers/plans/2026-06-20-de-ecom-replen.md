@@ -713,8 +713,12 @@ ECR.runSelfTests = function(){
   // smoothed = 0.5*(70/30)+0.3*(137/60)+0.2*(222/90)
   const sm = 0.5*(70/30)+0.3*(137/60)+0.2*(222/90);
   ok('weeklyDemand smoothed', approx(ECR.engine.weeklyDemand(item,{model:'smoothed',trendOn:false}), sm*7));
-  // trend = rate(30)/rate(90) = (70/30)/(222/90)
-  ok('trend accelerating', ECR.engine.trend(item).label==='accelerating');
+  // trend = rate(30)/rate(90). NOTE: the `item` fixture above is ~steady in daily-rate terms
+  // (r30=70/30=2.33 vs r90=222/90=2.47 -> ratio 0.95). Use a dedicated fixture whose RECENT
+  // daily rate genuinely outpaces the long-run rate to exercise the 'accelerating' branch.
+  const itemAcc={ ecz_30d:90, ecz_90d:200, vcs_30d:0, vcs_90d:0 }; // r30=3.0, r90=2.22, ratio=1.35
+  ok('trend accelerating', ECR.engine.trend(itemAcc).label==='accelerating');
+  ok('trend steady (item)', ECR.engine.trend(item).label==='steady');
   // zero-demand item
   const zero={ecz_7d:0,ecz_15d:0,ecz_30d:0,ecz_60d:0,ecz_90d:0,vcs_7d:0,vcs_15d:0,vcs_30d:0,vcs_60d:0,vcs_90d:0};
   ok('zero weeklyDemand', ECR.engine.weeklyDemand(zero,{model:'smoothed',trendOn:false})===0);
