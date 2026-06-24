@@ -93,33 +93,63 @@ external sync. Key column groups:
 
 > Excel serial dates (e.g. `46190.96…`) are converted to ISO timestamps on load.
 
-### 3.2b `v_replen_base` — NEW (server-side join view) + smart load
+### 3.2b `v_replen_base` — NEW (server-side join, MATERIALIZED) + smart load
 Because the master is 337,276 rows, the app does **not** load it all into the browser. A
-Postgres **view** does the join server-side; the app loads only what it needs.
+Postgres **materialized view** does the join server-side; the app loads only what it needs.
+
+> **Why materialized (as built):** computing the join + `is_actionable` on the fly over the
+> 338k-row master exceeded the **anon role's 3 s statement timeout** (page 1 took ~16 s). A
+> regular view is unusable for anon reads. The materialized view with indexes on
+> `(is_actionable, item_no)` and a unique `item_no` makes anon reads fast (page 1 ≈ 2 s,
+> count ≈ 0.5 s, deep pages ≈ 1.5 s).
+>
+> **OPERATIONAL REQUIREMENT:** a materialized view is a frozen snapshot. The external sync
+> job (and the one-time bootstrap) **must** run
+> `refresh materialized view concurrently public.v_replen_base;` after updating
+> `ecom_inventory` / `ecom_open_orders`, or the app serves stale stock/demand. Document this
+> in the sync runbook.
 
 ```sql
-create or replace view public.v_replen_base as
+create materialized view public.v_replen_base as
 select m.item_no, m.upc, m.brand_name, m.model, m.product_color_code, m.size,
        m.product_group_code, m.item_category_code, m.description,
-       e.*,                               -- all ecom_inventory columns (e.item_no may be null)
-       oo.vendor_open, oo.next_eta,        -- aggregated open orders
-       (e.item_no is not null) as has_ecom
+       e.<explicit ecom columns>,          -- leaf stock/sales/oor fields the engine needs
+       coalesce(oo.vendor_open,0) as vendor_open, oo.next_eta,
+       (e.item_no is not null) as has_ecom,
+       (<sales>0 OR <available pools>0 OR ecom_oor>0 OR vendor_open>0) as is_actionable
 from public.mau_main_items m
 left join public.ecom_inventory e on e.item_no = m.item_no
 left join (
   select item_no, sum(qty_outstanding) as vendor_open, min(expected_receipt_date) as next_eta
   from public.ecom_open_orders group by item_no
 ) oo on oo.item_no = m.item_no;
+create unique index v_replen_base_item_uidx on public.v_replen_base(item_no);
+create index v_replen_base_actionable_idx on public.v_replen_base(is_actionable, item_no);
 ```
 
-**Load strategy (smart):**
-- **Actionable working set (loaded fully, ~20–35k):** rows where `has_ecom` is true OR
-  `vendor_open > 0` — i.e. anything with sales, stock, or an open PO. Forecast/coverage/PO
-  run only here. Query: `v_replen_base?or=(has_ecom.eq.true,vendor_open.gt.0)`.
-- **Catalog browse (server-side, ~300k):** master items with no e-com data are **not**
-  preloaded. A "Show non-selling catalog items" toggle browses them via server-side
-  paginated/filtered queries on `v_replen_base` (no forecast needed — they have no demand).
+**Load strategy (smart) — confirmed against real data (84,367 e-com rows):**
+- **Actionable working set (loaded fully, ≈6,318):** `is_actionable = true` — items with
+  sales OR sellable stock OR OOR OR open PO. Forecast/coverage/PO run only here. Query:
+  `v_replen_base?select=*&is_actionable=is.true&order=item_no.asc`. (Earlier `has_ecom`-based
+  filter was wrong: every e-com row has `has_ecom=true`, so it returned all ~84k.)
+- **Catalog browse (server-side, ~330k non-actionable):** not preloaded. A "Show non-selling
+  catalog items" toggle fetches a **single capped** page (`is_actionable=is.false&limit=5000`;
+  PostgREST clamps to its `max-rows`, ~1000). No forecast (no demand).
+- **Unmatched e-com (data quality):** computed server-side by the `v_ecom_unmatched`
+  anti-join view (e-com `item_no` absent from master) — ≈489 rows, ~1.6 s. NOT a client diff.
 - Both paths read `&order=item_no` for stable pagination (DE Replen Pro lesson).
+
+### 3.2c `v_ecom_unmatched` — NEW (data-quality anti-join view)
+```sql
+create or replace view public.v_ecom_unmatched as
+select e.item_no, e.asin, e.brand_name, e.amz_description,
+       e.ecz_90d, e.vcs_90d, e.total_on_hand_qty
+from public.ecom_inventory e
+left join public.mau_main_items m on m.item_no = e.item_no
+where m.item_no is null;
+```
+Drives the Report tab's "⚠ Unmatched e-com items" view (the ≈489 e-com SKUs that should be
+added to the master upstream).
 
 ### 3.3 `ecom_sales_history` — NEW (empty for now)
 Time series stub for genuine seasonality. PK `(item_no, source, period_date)`.
