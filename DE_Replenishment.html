@@ -1143,7 +1143,10 @@
 <!-- SETTINGS -->
 <div class="panel" id="panel-settings">
   <div class="card">
-    <div class="card-title">NAV export settings</div>
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>NAV export settings</span>
+      <span id="navSettingsCloud" style="font-size:11px;font-weight:400;color:var(--muted)">&#9729; Shared across all users</span>
+    </div>
     <div class="row row2" style="margin-bottom:10px">
       <div class="field"><label>Warehouse name in NAV</label><input type="text" id="cfgWH" value="MAIN WAREHOUSE" onchange="saveNavSettings()"></div>
       <div class="field"><label>Action Message value</label><input type="text" id="cfgAction" value="New" onchange="saveNavSettings()"></div>
@@ -4702,6 +4705,14 @@ function populateNavLocMap(){
   }).join('');
 }
 // ── NAV export settings persistence ───────────────────────────────────────
+// localStorage is the fast local cache; Supabase de_nav_settings (single row id=1)
+// is the SHARED source of truth across all users — same pattern as capacity/exceptions.
+function setNavSettingsCloud(text,color){
+  const el=document.getElementById('navSettingsCloud');
+  if(!el) return;
+  const col=color==='green'?'var(--green)':color==='amber'?'var(--amber)':color==='red'?'var(--red)':'var(--muted)';
+  el.style.color=col; el.innerHTML=text;
+}
 function saveNavSettings(){
   try{
     const wh=document.getElementById('cfgWH')?.value??'';
@@ -4715,6 +4726,8 @@ function saveNavSettings(){
     });
     localStorage.setItem('de_nav_loc_map',JSON.stringify(map));
   }catch(e){}
+  // Push to Supabase so the change is shared with every user (non-blocking).
+  if(typeof pushNavSettings==='function') pushNavSettings().catch(err=>setNavSettingsCloud('⚠ Cloud save failed: '+err.message,'amber'));
 }
 function loadNavSettings(){
   try{
@@ -4726,6 +4739,42 @@ function loadNavSettings(){
 }
 function loadNavLocMap(){
   try{const raw=localStorage.getItem('de_nav_loc_map');return raw?JSON.parse(raw):{};}catch(e){return{};}
+}
+// Push current NAV settings to the shared Supabase row (last-write-wins).
+async function pushNavSettings(){
+  const {url,key}=getSBCreds();
+  if(!url||!key) return;
+  const wh=localStorage.getItem('de_nav_wh')||'';
+  const act=localStorage.getItem('de_nav_action')||'';
+  let locMap={}; try{ locMap=JSON.parse(localStorage.getItem('de_nav_loc_map')||'{}'); }catch(_){}
+  const who=(typeof getCurrentUserLabel==='function')?getCurrentUserLabel():'someone';
+  const now=new Date().toISOString();
+  await sbFetch('/de_nav_settings?on_conflict=id',{
+    method:'POST',
+    prefer:'resolution=merge-duplicates,return=minimal',
+    body:[{id:1,wh_name:wh,action_message:act,loc_map:locMap,updated_at:now,updated_by:who}]
+  });
+  setNavSettingsCloud('☁ Saved · just now by <strong>'+hesc(who)+'</strong>','green');
+}
+// Pull the shared NAV settings from Supabase and apply (overlays localStorage + DOM).
+async function pullNavSettings(){
+  const {url,key}=getSBCreds();
+  if(!url||!key) return;
+  try{
+    const rows=await sbFetch('/de_nav_settings?select=*&id=eq.1');
+    if(!Array.isArray(rows)||!rows.length) return;
+    const r=rows[0];
+    // Cloud is the source of truth — overwrite the local cache, then re-apply to the UI.
+    if(r.wh_name!=null) localStorage.setItem('de_nav_wh',r.wh_name);
+    if(r.action_message!=null) localStorage.setItem('de_nav_action',r.action_message);
+    if(r.loc_map!=null) localStorage.setItem('de_nav_loc_map',JSON.stringify(r.loc_map||{}));
+    if(typeof loadNavSettings==='function') loadNavSettings();
+    if(typeof populateNavLocMap==='function') populateNavLocMap();
+    if(r.updated_at){
+      const ago=(typeof fmtRelTime==='function')?fmtRelTime(r.updated_at):'';
+      setNavSettingsCloud('☁ Shared · last saved <strong>'+ago+'</strong>'+(r.updated_by?' by <strong>'+hesc(r.updated_by)+'</strong>':''),'green');
+    }
+  }catch(e){ setNavSettingsCloud('⚠ Cloud load failed: '+e.message,'amber'); }
 }
 
 // Live connect
@@ -6359,6 +6408,10 @@ loadCredentials();
 function refreshLiveConnectCloudLabels(){
   if(typeof refreshCacheLastSync==='function'){
     refreshCacheLastSync().catch(()=>{});
+  }
+  // NAV export settings are shared via Supabase — pull the latest into the Settings tab.
+  if(typeof pullNavSettings==='function'){
+    pullNavSettings().catch(()=>{});
   }
   if(S.whSource==='supabase'){
     if(typeof pullFromInventoryAvailable==='function'){
