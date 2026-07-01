@@ -354,10 +354,10 @@ locs.filter(l => l.active
 
 ## UI Structure
 
-### Tab Order (current — Transfers added May 2026)
+### Tab Order (current — Transfers shipped July 2026)
 `Live Connect -> Inventory -> Dashboard -> Capacity -> Exceptions -> Store Selection -> Transfers`
 
-Transfers is a placeholder (May 2026); content TBD. Keyboard shortcut Ctrl+7 = Transfers. The Settings tab is hidden by default (`display:none` on the button) and only contains NAV export settings — all data-source/priority/replenishment-rules controls have been moved out.
+Keyboard shortcut Ctrl+7 = Transfers. The Settings tab is hidden by default (`display:none` on the button) and only contains NAV export settings — all data-source/priority/replenishment-rules controls have been moved out.
 
 ### Live Connect Steps (Current — renamed May 2026)
 1. Test connection
@@ -523,6 +523,46 @@ Single card: "Exception list — SKUs to NEVER send to specific stores"
 - Per-store collapsed cards; each header pill shows total store on-hand `before → after`
 - Table columns: `SKU (NAV No.) · Brand · Type · 90d vel · Store qty · After (green) · WH qty · QTY · Signals`
 
+### Transfers Tab (current — shipped July 2026)
+Store-to-store dead-stock reallocation. Mirror-image of replenishment: instead of WH → store, it moves sitting inventory from a low-rotation store to a store where the SKU (or brand+type) is actively selling.
+
+**Card:** "Store-to-store transfer suggestions" · cloud-status pill in the header (`transfersCloudStatus`).
+
+**Controls (row above results):**
+- `transferMinDays` — number input, "Flag as sitting after N days without movement" (default 120, persisted `de_transfer_min_days`)
+- `transferMatchLevel` — select: `both` (exact SKU first, then Brand+Type · default) · `sku` · `brandtype` (persisted `de_transfer_match`)
+- `btnBuildTransfers` — `▶ Find transfers` runs `buildTransfers()`
+- `btnExportTransfers` — `📋 Export` writes xlsx + logs ledger (disabled until results exist)
+
+**Sitting-clock resolution (`buildLastInboundMap`):**
+1. `S._transfersLatest` — pulled from Supabase view `de_transfers_latest` (authoritative; direction-aware inbound date per `to_loc|sku`)
+2. Fallback: `S.raw.inventory[].updated_at` joined via `itemMap[inventory_item_id].variantSku` — key `location_id|sku`
+Ledger always wins when both are present. `daysSitting = floor((now − ms) / 86_400_000)`.
+
+**Dead-source rule** (in `buildTransfers`):
+`storeQty > 0` AND `velocity90 === 0` AND row is within Inventory scope AND `daysSitting ≥ transferMinDays`. No clock evidence (no ledger row and no `updated_at`) → skip conservatively.
+
+**Destination logic:**
+- Exact-SKU: other stores with a DATA row for the same SKU, `velocity90 > 0`, not excepted, sorted by dest velocity desc
+- Brand+Type: stores whose aggregate `sum(velocity90) for (brand,type)` > 0, not excepted for the source SKU, sorted by aggregate vel desc
+- Both share a per-(store,brand,type) `committed` counter → destinations never receive more units than `cap - onHand - committed`. Multiple dead sources compete for the same room in a single run.
+
+**Ledger — Supabase shared source of truth:**
+- Table `de_transfers(id, exported_at, from_loc, to_loc, variant_sku, qty, source, user_label)` — anon RLS (select/insert/update/delete); indexes on `(to_loc, variant_sku, exported_at desc)` and `(exported_at desc)`
+- View `de_transfers_latest` — `DISTINCT ON (to_loc, variant_sku) ... ORDER BY ... exported_at DESC` (one row per store+SKU)
+- `logTransferExport(rows, source)` — non-blocking POST in 500-row batches, appends to `de_transfers`, then re-pulls the view so the sitting-clock immediately reflects the write
+- **Called from** `exportNAV` (source=`'replenishment'`, from_loc=`'WAREHOUSE'`) AND `exportTransfers` (source=`'transfer'`, from_loc=source store's location_id)
+- Pulled on boot (via tab switch to Transfers, guarded by `S._transfersCloudPulled`) and after `processLiveData` (non-blocking)
+
+**Persistence:** `de_transfer_min_days`, `de_transfer_match` (localStorage). In-memory only: `S._transfersLatest`, `S._transferPlan`, `S._transfersCloudPulled`.
+
+**Excel export (`exportTransfers`):** one sheet "Transfers" with columns `From Store · From Loc ID · To Store · To Loc ID · SKU · Brand · Type · Description · Qty · Days Sitting (source) · Dest 90d Vel · Confidence`. SKU column forced to text (`t='s'`) so Excel doesn't scientific-notation numeric SKUs.
+
+**Design notes:**
+- The ledger date is "sent" (when the NAV file was exported), not "confirmed received" — leads true receipt by transit lag. Acceptable and clearly labeled.
+- `S.raw.inventory[].updated_at` is direction-blind (any adjustment resets it — including a sale). The ledger overrides it precisely for that reason.
+- Sample mode won't produce meaningful Transfers output (no `updated_at`, no ledger) — expected.
+
 ### Inventory Tab Table
 Brand x Type grouped: `Brand | Type | On Hand | 90d Sales | Capacity | Fill% | [per-store cols]`
 
@@ -629,8 +669,8 @@ S = {
 
 ## Before Every File Delivery — Checklist
 - [ ] No duplicate function definitions
-- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `renderPriorityList`, `renderScopeBadges`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `wipeAllCapacities`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadCapTemplate`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`, `getQtyForRow`, `saveStoreSelection`, `loadStoreSelection`, `saveVelTiers`, `loadVelTiers`, `toggleVelTierPanel`, `renderVelTiers`, `parseExcFile`, `loadExcFromLocalStorage`, `saveExcToLocalStorage`, `isExcepted`, `downloadExcTemplate`, `exportExcList`, `clearExcList`, `buildImpactRows`, `renderImpactReport`, `sortImpactReport`, `exportImpactReport`, `toggleTheme`
-- [ ] File size 200–230 KB after recent feature additions (Exceptions tab, velocity tiers, persistence) — sudden drop still indicates truncation
+- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `renderPriorityList`, `renderScopeBadges`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `wipeAllCapacities`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadCapTemplate`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`, `getQtyForRow`, `saveStoreSelection`, `loadStoreSelection`, `saveVelTiers`, `loadVelTiers`, `toggleVelTierPanel`, `renderVelTiers`, `parseExcFile`, `loadExcFromLocalStorage`, `saveExcToLocalStorage`, `isExcepted`, `downloadExcTemplate`, `exportExcList`, `clearExcList`, `buildImpactRows`, `renderImpactReport`, `sortImpactReport`, `exportImpactReport`, `toggleTheme`, `buildTransfers`, `renderTransfersTable`, `exportTransfers`, `buildLastInboundMap`, `pullTransfersFromSupabase`, `logTransferExport`, `loadTransferMinDays`, `saveTransferMinDays`, `setTransfersCloudStatus`
+- [ ] File size ~400 KB (July 2026 baseline, post-Transfers tab) — sudden drop still indicates truncation
 - [ ] `<div class="app">` count = 1
 - [ ] No `since_id` in orders URLs
 - [ ] No `inventory_item_id_gt` anywhere
@@ -653,7 +693,13 @@ S = {
 - [ ] `populateDashFilters`, `populateSimSelects`, `syncInvToDash`, `syncDashToInv`, `applySettings`, `savePriority` are ABSENT
 - [ ] Tab DOM order: `tab-connect`, `tab-inventory`, `tab-dashboard`, `tab-capacity`, `tab-exceptions`, `tab-stores`, `tab-transfers` (Settings hidden)
 - [ ] `panel-exceptions` present with `excFile` upload + `excCount` + Download/Export/Clear buttons
-- [ ] `panel-transfers` present (placeholder "Coming soon" card)
+- [ ] `panel-transfers` present with `transferMinDays` + `transferMatchLevel` + `btnBuildTransfers` + `btnExportTransfers` + `transfersCloudStatus` + `transfersStatus` + `transfersResult` (no "Coming soon" placeholder)
+- [ ] `showTab('transfers')` hydrates the input via `loadTransferMinDays()` and lazily pulls `de_transfers_latest` once (guarded by `S._transfersCloudPulled`)
+- [ ] `exportNAV` fires `logTransferExport(ledgerRows,'replenishment')` after `XLSX.writeFile` — feeds sitting-clock
+- [ ] `exportTransfers` fires `logTransferExport(ledgerRows,'transfer')` after `XLSX.writeFile`
+- [ ] `processLiveData` calls `pullTransfersFromSupabase()` non-blocking after `pullExceptionsFromSupabase`
+- [ ] Boot line calls `loadTransferMinDays()` (guarded `typeof ==='function'`) at end of the buildSample+load hooks chain
+- [ ] `de_transfers` table + `de_transfers_latest` view + anon RLS (select/insert/update/delete) exist in Supabase
 - [ ] `S.exceptions` is a `Set` (not array) initialized in S
 - [ ] `isExcepted(storeId, sku)` check at the TOP of the `DATA.forEach` in `buildRecos`
 - [ ] `velTierPanel` toggleable in Store Selection tab; `S.velTiers` defaulted from `VEL_TIERS_DEFAULT`
@@ -663,7 +709,7 @@ S = {
 - [ ] `loadCapFromLocalStorage()` + `applyCapToData()` called in `processLiveData` AFTER S.CAP rebuild
 - [ ] `loadVelTiers()` + `loadExcFromLocalStorage()` + `loadStoreSelection()` + `loadWHSettings()` + `loadWHSource()` called in both boot path (after `buildSample`) and live-data path (in `processLiveData`)
 - [ ] Settings tab ONLY contains NAV export settings card (no Data source / Store priority / Replenishment rules / Capacity upload)
-- [ ] localStorage keys: `de_capacity_v1`, `de_capacity_saved_at`, `de_exceptions_v1`, `de_store_sel_set`, `de_store_sel_order`, `de_priority_mode`, `de_vel_tiers`, `de_overcap_pct`, `de_wh_source`, `de_wh_col_map`, `de_wh_filter_locations`, `de_wh_filter_zones`, `de_wh_all_locations`, `de_wh_all_zones`, `de_wh_all_sheets`, `de_wh_all_columns`, `de_user_label`, `de_vel_panel_open`, plus existing `de_inv_*_filter`
+- [ ] localStorage keys: `de_capacity_v1`, `de_capacity_saved_at`, `de_exceptions_v1`, `de_store_sel_set`, `de_store_sel_order`, `de_priority_mode`, `de_vel_tiers`, `de_overcap_pct`, `de_wh_source`, `de_wh_col_map`, `de_wh_filter_locations`, `de_wh_filter_zones`, `de_wh_all_locations`, `de_wh_all_zones`, `de_wh_all_sheets`, `de_wh_all_columns`, `de_user_label`, `de_vel_panel_open`, `de_transfer_min_days`, `de_transfer_match`, plus existing `de_inv_*_filter`
 
 ### Step 4A/4B + WH source toggle invariants
 - [ ] WH source segmented toggle present (`#whSrcBtnUpload`, `#whSrcBtnSupabase`) with `selectWHSource(target)` handlers

@@ -807,14 +807,39 @@
 <!-- TRANSFERS — placeholder, content TBD -->
 <div class="panel" id="panel-transfers">
   <div class="card">
-    <div class="card-title">Transfers</div>
-    <div style="padding:48px 24px;text-align:center;color:var(--muted)">
-      <div style="font-size:36px;line-height:1;margin-bottom:12px">&#128230;</div>
-      <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px">Coming soon</div>
-      <div style="font-size:13px;max-width:480px;margin:0 auto;line-height:1.5">
-        This tab is reserved for the upcoming Transfers workflow. We'll build it out next session.
-      </div>
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>Store-to-store transfer suggestions</span>
+      <span id="transfersCloudStatus" style="font-size:11px;color:var(--muted);font-weight:400">&#9729; Ledger shared across all users</span>
     </div>
+    <div style="font-size:12px;color:var(--muted);max-width:760px;line-height:1.5;margin-bottom:14px">
+      Finds SKUs sitting dead at one store and suggests moving them to another store where they'll sell.
+      A SKU is "dead" if it has stock on hand, zero sales in 90 days, and hasn't been touched at that store for at least
+      <strong>N days</strong> (adjustable below). Matches are ranked: exact-SKU first (destination is already selling
+      this specific frame), then Brand+Type (destination is selling the category well). Uses the shared transfer ledger
+      as the "last received" clock, with Shopify's <code>updated_at</code> as fallback. Respects Inventory-tab filters,
+      the Exceptions list, and destination capacity.
+    </div>
+    <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Flag as sitting after</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="number" id="transferMinDays" min="1" max="3650" value="120" onchange="saveTransferMinDays()" style="width:80px;padding:5px 8px;font-size:13px;text-align:right;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--text)">
+          <span style="font-size:12px;color:var(--muted)">days without movement</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Match level</label>
+        <select id="transferMatchLevel" onchange="saveTransferMinDays()" style="width:auto;min-width:220px;font-size:12px;padding:5px 8px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)">
+          <option value="both" selected>Exact SKU first, then Brand+Type</option>
+          <option value="sku">Exact SKU only</option>
+          <option value="brandtype">Brand+Type only</option>
+        </select>
+      </div>
+      <button id="btnBuildTransfers" class="btn btn-primary btn-sm" onclick="buildTransfers()" style="margin-left:auto">&#9654; Find transfers</button>
+      <button id="btnExportTransfers" class="btn btn-navy btn-sm" onclick="exportTransfers()" disabled style="opacity:.4;cursor:not-allowed">&#128203; Export</button>
+    </div>
+    <div id="transfersStatus" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
+    <div id="transfersResult" class="table-scroll" style="border:1px solid var(--border);border-radius:var(--radius);max-height:65vh;overflow:auto"></div>
   </div>
 </div>
 
@@ -2260,6 +2285,7 @@ function showTab(t){
   if(t==='inventory'){populateInvFilters();renderInv();}
   if(t==='capacity'){ renderCap(); if(typeof pullCapacityFromSupabase==='function' && !S._capCloudPulled){ S._capCloudPulled=true; pullCapacityFromSupabase().catch(()=>{}); } }
   if(t==='exceptions'){ renderExcList(); if(typeof pullExceptionsFromSupabase==='function' && !S._excCloudPulled){ S._excCloudPulled=true; pullExceptionsFromSupabase().catch(()=>{}); } }
+  if(t==='transfers'){ if(typeof loadTransferMinDays==='function') loadTransferMinDays(); if(typeof pullTransfersFromSupabase==='function' && !S._transfersCloudPulled){ S._transfersCloudPulled=true; pullTransfersFromSupabase().catch(()=>{}); } }
   // Gate by source: pullWHFromSupabase reads de_wh_bins (the 3A source). Firing it while
   // the user is in 3B (Supabase live) mode would let processWHRows overwrite the active
   // inventory_available data with stale 3A bin counts on every Connect-tab visit.
@@ -3412,6 +3438,13 @@ function exportNAV(recsOverride){
     XLSX.utils.book_append_sheet(wb,ws,sheetName||sid);
   });
   XLSX.writeFile(wb,`NAV_TransferOrders_${new Date().toISOString().slice(0,10)}.xlsx`);
+  // Log to the shared transfer ledger — feeds the Transfers tab's sitting-clock
+  try{
+    if(typeof logTransferExport==='function'){
+      const ledgerRows=r.map(x=>({fromId:'WAREHOUSE', toId:x.storeId, sku:x.sku, qty:x.transferQty}));
+      logTransferExport(ledgerRows,'replenishment');
+    }
+  }catch(_){}
 }
 function exportNAVSingle(sid){
   // Export a single store's recos without mutating S.activeRecos
@@ -4428,6 +4461,325 @@ async function clearWHCloud(){
     setWHCloudStatus('Cloud WH cleared','amber');
     clog('☁ WH cloud copy cleared');
   }catch(e){ setWHCloudStatus('Cloud clear failed: '+e.message,'red'); }
+}
+
+// =====================================================================
+// TRANSFERS TAB — store-to-store dead-stock suggestions + shared ledger
+// =====================================================================
+function setTransfersCloudStatus(text,color){
+  const el=document.getElementById('transfersCloudStatus');
+  if(!el) return;
+  el.innerHTML=text;
+  const map={green:'var(--green)',amber:'var(--amber)',red:'var(--red)',muted:'var(--muted)'};
+  el.style.color=map[color]||'var(--muted)';
+}
+function saveTransferMinDays(){
+  const d=Math.max(1,parseInt(document.getElementById('transferMinDays')?.value||'120',10));
+  const m=document.getElementById('transferMatchLevel')?.value||'both';
+  try{ localStorage.setItem('de_transfer_min_days',String(d)); localStorage.setItem('de_transfer_match',m); }catch(_){}
+}
+function loadTransferMinDays(){
+  let d=120, m='both';
+  try{
+    const rd=localStorage.getItem('de_transfer_min_days'); if(rd) d=parseInt(rd,10)||120;
+    const rm=localStorage.getItem('de_transfer_match'); if(rm) m=rm;
+  }catch(_){}
+  const dEl=document.getElementById('transferMinDays'); if(dEl) dEl.value=d;
+  const mEl=document.getElementById('transferMatchLevel'); if(mEl) mEl.value=m;
+  return {days:d,match:m};
+}
+function buildLastInboundMap(){
+  // Returns { "<location_id>|<sku-lowercase>": ms-since-epoch of last inbound }
+  // Ledger (de_transfers_latest) is the authoritative source; Shopify updated_at fills the rest.
+  const map={};
+  if(Array.isArray(S._transfersLatest)){
+    S._transfersLatest.forEach(r=>{
+      if(!r.to_loc||!r.variant_sku||!r.exported_at) return;
+      const k=String(r.to_loc)+'|'+String(r.variant_sku).toLowerCase();
+      const ms=Date.parse(r.exported_at);
+      if(!isNaN(ms)) map[k]=ms;
+    });
+  }
+  if(S.raw && Array.isArray(S.raw.inventory) && S.raw.itemMap){
+    S.raw.inventory.forEach(inv=>{
+      if(!inv||!inv.updated_at) return;
+      const item=S.raw.itemMap[String(inv.inventory_item_id)];
+      if(!item||!item.variantSku) return;
+      const k=String(inv.location_id)+'|'+normSku(item.variantSku).toLowerCase();
+      if(map[k]) return; // ledger wins
+      const ms=Date.parse(inv.updated_at);
+      if(!isNaN(ms)) map[k]=ms;
+    });
+  }
+  return map;
+}
+async function pullTransfersFromSupabase(manual=false){
+  const {url,key}=getSBCreds();
+  if(!url||!key){ setTransfersCloudStatus('&#9729; Ledger shared across all users'); return; }
+  try{
+    setTransfersCloudStatus('&#9729; Pulling ledger&hellip;');
+    let all=[]; let from=0; const pageSize=1000;
+    while(true){
+      const page=await sbFetch('/de_transfers_latest?select=to_loc,variant_sku,exported_at,from_loc,qty,source,user_label&order=variant_sku&limit='+pageSize+'&offset='+from);
+      if(!Array.isArray(page)||!page.length) break;
+      all=all.concat(page);
+      if(page.length<pageSize) break;
+      from+=pageSize;
+    }
+    S._transfersLatest=all;
+    if(all.length){
+      setTransfersCloudStatus('&#9729; '+all.length.toLocaleString()+' ledger entries loaded','green');
+    } else {
+      setTransfersCloudStatus('&#9729; Ledger empty &mdash; first exports will populate it','muted');
+    }
+    if(manual) clog('&#9729; Transfer ledger pulled: '+all.length+' entries');
+  }catch(e){
+    if(e.message&&e.message.includes('404')){
+      setTransfersCloudStatus('&#9888; Ledger table not found &mdash; run the DDL','amber');
+    } else {
+      setTransfersCloudStatus('&#9888; Ledger pull failed: '+e.message,'amber');
+    }
+  }
+}
+async function logTransferExport(rows,source){
+  // Non-blocking; never throws. rows: [{fromId,toId,sku,qty}, ...]
+  try{
+    const {url,key}=getSBCreds();
+    if(!url||!key) return;
+    if(!Array.isArray(rows)||!rows.length) return;
+    const who=getCurrentUserLabel();
+    const now=new Date().toISOString();
+    const payload=rows.filter(r=>r&&r.sku&&r.qty>0&&r.toId).map(r=>({
+      exported_at:now,
+      from_loc:String(r.fromId||'WAREHOUSE'),
+      to_loc:String(r.toId),
+      variant_sku:normSku(r.sku).toLowerCase(),
+      qty:Math.round(r.qty),
+      source:source||'replenishment',
+      user_label:who
+    }));
+    if(!payload.length) return;
+    for(let i=0;i<payload.length;i+=500){
+      const batch=payload.slice(i,i+500);
+      await sbFetch('/de_transfers',{method:'POST',prefer:'return=minimal',body:batch});
+    }
+    clog('&#9729; Ledger: logged '+payload.length+' transfer line'+(payload.length===1?'':'s')+' ('+source+')');
+    // Refresh in-memory latest map so the next Transfers-tab run sees the new inbound dates
+    pullTransfersFromSupabase(false).catch(()=>{});
+  }catch(e){ clog('Ledger log warning: '+e.message); }
+}
+function buildTransfers(){
+  const statusEl=document.getElementById('transfersStatus');
+  const resEl=document.getElementById('transfersResult');
+  const expBtn=document.getElementById('btnExportTransfers');
+  const disable=()=>{ if(expBtn){ expBtn.disabled=true; expBtn.style.opacity=.4; expBtn.style.cursor='not-allowed'; } };
+  const enable =()=>{ if(expBtn){ expBtn.disabled=false; expBtn.style.opacity=1;  expBtn.style.cursor='pointer'; } };
+  if(!DATA.length){
+    statusEl.innerHTML='<span style="color:var(--red)">No data loaded. Complete Step 3 first.</span>';
+    resEl.innerHTML=''; disable(); return;
+  }
+  const {days:minDays, match}=loadTransferMinDays();
+  const invStores=getFilterValues('invStoreFilter');
+  const invBrands=getFilterValues('invBrandFilter');
+  const invTypes =getFilterValues('invTypeFilter');
+  const lastInbound=buildLastInboundMap();
+  const now=Date.now();
+
+  // Scope DATA to Inventory filters (same rule the rest of the app uses)
+  const scope=DATA.filter(d=>
+    (!invStores.length||invStores.includes(d.storeId))&&
+    (!invBrands.length||invBrands.includes(d.brand))&&
+    (!invTypes.length ||invTypes.includes(d.type))
+  );
+
+  // Aggregate on-hand + capacity room per (store, brand, type); shared committed budget
+  const bAgg={};
+  scope.forEach(d=>{
+    const bk=d.storeId+'|'+d.brand+'|'+d.type;
+    if(!bAgg[bk]){
+      bAgg[bk]={ cap:(S.CAP[d.storeId]?.[d.brand]?.[d.type])||0, onHand:0, committed:0 };
+    }
+    bAgg[bk].onHand+=(d.storeQty||0);
+  });
+
+  // Fast lookup for exact-SKU destination rows
+  const bySkuByStore={};
+  scope.forEach(d=>{
+    const k=String(d.sku||'').toLowerCase(); if(!k) return;
+    if(!bySkuByStore[k]) bySkuByStore[k]={};
+    if(!bySkuByStore[k][d.storeId]) bySkuByStore[k][d.storeId]=d;
+  });
+
+  // Aggregate brand+type velocity per destination store
+  const btVel={};
+  scope.forEach(d=>{
+    const bk=d.storeId+'|'+d.brand+'|'+d.type;
+    btVel[bk]=(btVel[bk]||0)+(d.velocity90||0);
+  });
+
+  // Identify dead source rows
+  const dead=[];
+  scope.forEach(d=>{
+    if(!d.storeQty||d.storeQty<=0) return;
+    if((d.velocity90||0)>0) return; // any 90d sale disqualifies as "dead here"
+    const skuKey=String(d.sku||'').toLowerCase(); if(!skuKey) return;
+    const inboundKey=String(d.storeId)+'|'+skuKey;
+    const lastMs=lastInbound[inboundKey];
+    if(!lastMs) return; // no clock evidence — skip conservatively
+    const daysSit=Math.floor((now-lastMs)/86400000);
+    if(daysSit<minDays) return;
+    dead.push({d, daysSit, skuKey});
+  });
+
+  if(!dead.length){
+    statusEl.innerHTML='<span style="color:var(--muted)">No sitting stock found under current settings (&ge; '+minDays+' days without movement, zero 90d sales, within active filters).</span>';
+    resEl.innerHTML=''; disable(); S._transferPlan=[]; return;
+  }
+
+  // Deadest + biggest surplus first
+  dead.sort((a,b)=>b.daysSit-a.daysSit || (b.d.storeQty-a.d.storeQty));
+
+  const wantSku=(match==='sku'||match==='both');
+  const wantBT =(match==='brandtype'||match==='both');
+  const suggestions=[];
+
+  dead.forEach(({d,daysSit,skuKey})=>{
+    let remaining=d.storeQty;
+    if(remaining<=0) return;
+
+    // 1) Exact-SKU destinations: other stores selling THIS SKU with capacity room
+    if(wantSku){
+      const dests=Object.values(bySkuByStore[skuKey]||{})
+        .filter(x=>x.storeId!==d.storeId && !isExcepted(x.storeId,x.sku) && (x.velocity90||0)>0)
+        .sort((a,b)=>(b.velocity90||0)-(a.velocity90||0));
+      dests.forEach(x=>{
+        if(remaining<=0) return;
+        const bk=x.storeId+'|'+x.brand+'|'+x.type;
+        const agg=bAgg[bk]; if(!agg||agg.cap<=0) return;
+        const room=Math.max(0, agg.cap - agg.onHand - agg.committed);
+        if(room<=0) return;
+        const qty=Math.min(remaining, room);
+        if(qty<=0) return;
+        agg.committed+=qty; remaining-=qty;
+        suggestions.push({
+          fromId:d.storeId, from:d.store, toId:x.storeId, to:x.store,
+          sku:d.sku, brand:d.brand, type:d.type, desc:d.desc,
+          qty, daysSit, destVel:x.velocity90||0, srcVel:d.velocity90||0,
+          confidence:'High (exact SKU)', matchType:'sku'
+        });
+      });
+    }
+
+    // 2) Brand+Type destinations: stores selling this brand+type well
+    if(wantBT && remaining>0){
+      const cands=[];
+      STORES.forEach(st=>{
+        if(st.id===d.storeId) return;
+        const bk=st.id+'|'+d.brand+'|'+d.type;
+        const vel=btVel[bk]||0;
+        const agg=bAgg[bk]; if(!agg||!vel||agg.cap<=0) return;
+        if(isExcepted(st.id,d.sku)) return;
+        cands.push({storeId:st.id, store:st.short||st.name, vel, agg});
+      });
+      cands.sort((a,b)=>b.vel-a.vel);
+      cands.forEach(c=>{
+        if(remaining<=0) return;
+        const room=Math.max(0, c.agg.cap - c.agg.onHand - c.agg.committed);
+        if(room<=0) return;
+        const qty=Math.min(remaining, room);
+        if(qty<=0) return;
+        c.agg.committed+=qty; remaining-=qty;
+        suggestions.push({
+          fromId:d.storeId, from:d.store, toId:c.storeId, to:c.store,
+          sku:d.sku, brand:d.brand, type:d.type, desc:d.desc,
+          qty, daysSit, destVel:c.vel, srcVel:d.velocity90||0,
+          confidence:'Medium (Brand+Type)', matchType:'brandtype'
+        });
+      });
+    }
+  });
+
+  // Sort: exact-SKU first, then longest sitting, then highest dest velocity
+  suggestions.sort((a,b)=>{
+    if(a.matchType!==b.matchType) return a.matchType==='sku'?-1:1;
+    return b.daysSit-a.daysSit || b.destVel-a.destVel;
+  });
+
+  S._transferPlan=suggestions;
+  const skuN=suggestions.filter(s=>s.matchType==='sku').length;
+  const btN =suggestions.length-skuN;
+  const units=suggestions.reduce((a,b)=>a+b.qty,0);
+  statusEl.innerHTML='<strong>'+suggestions.length+'</strong> suggestion'+(suggestions.length===1?'':'s')
+    +' &middot; <strong>'+units+'</strong> unit'+(units===1?'':'s')+' to move'
+    +' &middot; '+skuN+' exact-SKU, '+btN+' Brand+Type'
+    +' &middot; scope: '+dead.length+' dead source line'+(dead.length===1?'':'s');
+  renderTransfersTable(suggestions);
+  if(suggestions.length) enable(); else disable();
+}
+function renderTransfersTable(rows){
+  const el=document.getElementById('transfersResult'); if(!el) return;
+  if(!rows||!rows.length){
+    el.innerHTML='<div style="padding:20px;color:var(--muted);font-size:12px;text-align:center">No suggestions</div>';
+    return;
+  }
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const html=['<table style="width:100%;font-size:12px;border-collapse:collapse">',
+    '<thead style="position:sticky;top:0;background:var(--surface-2);z-index:1">',
+    '<tr>',
+    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">From</th>',
+    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">&rarr; To</th>',
+    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">SKU</th>',
+    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">Brand</th>',
+    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">Type</th>',
+    '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border2)">Qty</th>',
+    '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border2)">Days Sitting</th>',
+    '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border2)">Dest 90d Vel</th>',
+    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">Confidence</th>',
+    '</tr></thead><tbody>'];
+  rows.forEach(r=>{
+    const pillCls=r.matchType==='sku'?'p-ok':'p-info';
+    html.push('<tr style="border-top:1px solid var(--border)">'
+      +'<td style="padding:6px 8px">'+esc(r.from)+'</td>'
+      +'<td style="padding:6px 8px">'+esc(r.to)+'</td>'
+      +'<td style="padding:6px 8px;font-family:monospace;font-size:11px">'+esc(r.sku)+'</td>'
+      +'<td style="padding:6px 8px">'+esc(r.brand)+'</td>'
+      +'<td style="padding:6px 8px">'+esc(r.type)+'</td>'
+      +'<td style="padding:6px 8px;text-align:right;font-weight:600">'+r.qty+'</td>'
+      +'<td style="padding:6px 8px;text-align:right">'+r.daysSit+'</td>'
+      +'<td style="padding:6px 8px;text-align:right">'+Math.round(r.destVel)+'</td>'
+      +'<td style="padding:6px 8px"><span class="pill '+pillCls+'" style="font-size:10px">'+esc(r.confidence)+'</span></td>'
+      +'</tr>');
+  });
+  html.push('</tbody></table>');
+  el.innerHTML=html.join('');
+}
+function exportTransfers(){
+  const plan=S._transferPlan||[];
+  if(!plan.length){ alert('Run "Find transfers" first.'); return; }
+  const wb=XLSX.utils.book_new();
+  const dt=new Date().toLocaleDateString();
+  const header=['From Store','From Loc ID','To Store','To Loc ID','SKU','Brand','Type','Description','Qty','Days Sitting (source)','Dest 90d Vel','Confidence'];
+  const rows=[[`DESIGNER EYES — STORE-TO-STORE TRANSFERS · ${dt}`],[],header];
+  plan.forEach(p=>{
+    rows.push([p.from,p.fromId,p.to,p.toId,p.sku,p.brand,p.type,p.desc||'',p.qty,p.daysSit,Math.round(p.destVel||0),p.confidence]);
+  });
+  rows.push([]);
+  rows.push(['GRAND TOTAL','','','','','','','',plan.reduce((a,b)=>a+b.qty,0)]);
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:22},{wch:14},{wch:22},{wch:14},{wch:14},{wch:16},{wch:10},{wch:46},{wch:6},{wch:12},{wch:10},{wch:22}];
+  // Force SKU column (index 4) as text so Excel doesn't scientific-notation numeric SKUs
+  const firstBodyRow=3; // header is row 2 (0-based 2), body starts row 3
+  for(let i=firstBodyRow;i<firstBodyRow+plan.length;i++){
+    const addr=XLSX.utils.encode_cell({r:i,c:4});
+    if(ws[addr]){ ws[addr].t='s'; ws[addr].v=String(ws[addr].v); }
+  }
+  XLSX.utils.book_append_sheet(wb,ws,'Transfers');
+  XLSX.writeFile(wb,`DE_StoreTransfers_${new Date().toISOString().slice(0,10)}.xlsx`);
+  // Log the ledger — from source store this time, not the warehouse
+  try{
+    const ledgerRows=plan.map(p=>({fromId:p.fromId, toId:p.toId, sku:p.sku, qty:p.qty}));
+    logTransferExport(ledgerRows,'transfer');
+  }catch(_){}
 }
 
 async function pullCapacityFromSupabase(manual=false){
@@ -5565,6 +5917,10 @@ function processLiveData(locs,invLevels,orders){
   loadExcFromLocalStorage();
   // Then pull cloud exceptions (shared source of truth) — non-blocking
   pullExceptionsFromSupabase().catch(e=>clog('Exception cloud pull warning: '+e.message));
+  // Transfer ledger — sitting-clock source of truth for the Transfers tab
+  if(typeof pullTransfersFromSupabase==='function'){
+    pullTransfersFromSupabase().catch(e=>clog('Transfer ledger pull warning: '+e.message));
+  }
   // WH bin contents — itemMap is now built, so matching works
   // If we already pulled at boot, re-run processWHRows against existing S.whRaw to rebuild matches
   // Otherwise, fetch from Supabase
@@ -6362,7 +6718,7 @@ document.addEventListener('keydown',e=>{
 });
 
 // Init
-buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(typeof loadCatalogSource==='function') loadCatalogSource();if(typeof renderWHSettings==='function') renderWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();
+buildSample();loadVelTiers();loadExcFromLocalStorage();if(typeof loadWHSettings==='function') loadWHSettings();if(typeof loadWHSource==='function') loadWHSource();if(typeof loadCatalogSource==='function') loadCatalogSource();if(typeof renderWHSettings==='function') renderWHSettings();if(!loadStoreSelection()){selectAll();}else{syncPriority(S.priority||'urgency');}renderStoreGrid();populateNavLocMap();loadNavSettings();if(typeof loadTransferMinDays==='function') loadTransferMinDays();
 if(typeof updateCatalogSourcePill==='function') updateCatalogSourcePill();
 if(typeof updateProgress==='function') updateProgress();
 if(typeof restoreVelTierPanel==='function') restoreVelTierPanel();
