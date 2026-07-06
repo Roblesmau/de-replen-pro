@@ -4772,8 +4772,20 @@ function renderTransfersTable(rows){
   // suggestions and one giant innerHTML would stall the tab. Export has them all.
   const MAX_ROWS=500;
   const shown=rows.length>MAX_ROWS ? rows.slice(0,MAX_ROWS) : rows;
+  // Totals row (sticky, above the column headers) — computed over the FULL plan,
+  // not just the rendered slice
+  const totQty=rows.reduce((a,b)=>a+b.qty,0);
+  const totSku=rows.filter(r=>r.matchType==='sku').length;
+  const totSrc=new Set(rows.map(r=>r.fromId)).size;
+  const totDst=new Set(rows.map(r=>r.toId)).size;
   const html=['<table style="width:100%;font-size:12px;border-collapse:collapse">',
     '<thead style="position:sticky;top:0;background:var(--surface-2);z-index:1">',
+    '<tr style="background:var(--blue-bg);color:var(--blue)">',
+    '<td colspan="5" style="padding:8px;font-weight:700">TOTAL &mdash; '+rows.length.toLocaleString()+' suggestion'+(rows.length===1?'':'s')
+      +' <span style="font-weight:400">('+totSrc+' source '+(totSrc===1?'store':'stores')+' &rarr; '+totDst+' destination '+(totDst===1?'store':'stores')+')</span></td>',
+    '<td style="padding:8px;text-align:right;font-weight:700" title="Total units to move">'+totQty.toLocaleString()+'</td>',
+    '<td colspan="3" style="padding:8px">'+totSku.toLocaleString()+' exact-SKU &middot; '+(rows.length-totSku).toLocaleString()+' Brand+Type</td>',
+    '</tr>',
     '<tr>',
     '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">From</th>',
     '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">&rarr; To</th>',
