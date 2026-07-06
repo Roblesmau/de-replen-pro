@@ -842,6 +842,15 @@
       <button id="btnBuildTransfers" class="btn btn-primary btn-sm" onclick="buildTransfers()" style="margin-left:auto">&#9654; Find transfers</button>
       <button id="btnExportTransfers" class="btn btn-navy btn-sm" onclick="exportTransfers()" disabled style="opacity:.4;cursor:not-allowed">&#128203; Export</button>
     </div>
+    <!-- View filters — populated from the built plan; view-only (never re-run the engine) -->
+    <div id="transfersFilterBar" style="display:none;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <span style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Filter results</span>
+      <select id="transferFilterFrom" onchange="renderTransferView()" style="width:auto;min-width:150px;font-size:12px;padding:4px 8px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)"><option value="">All origins</option></select>
+      <select id="transferFilterTo" onchange="renderTransferView()" style="width:auto;min-width:150px;font-size:12px;padding:4px 8px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)"><option value="">All destinations</option></select>
+      <select id="transferFilterBrand" onchange="renderTransferView()" style="width:auto;min-width:150px;font-size:12px;padding:4px 8px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)"><option value="">All brands</option></select>
+      <button class="btn btn-secondary btn-sm" onclick="clearTransferFilters()" title="Reset From / To / Brand filters and sorting">&#8634; Clear</button>
+      <span style="font-size:11px;color:var(--hint)">Click any column header to sort &middot; Export follows these filters</span>
+    </div>
     <div id="transfersStatus" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
     <div id="transfersResult" class="table-scroll" style="border:1px solid var(--border);border-radius:var(--radius);max-height:65vh;overflow:auto"></div>
   </div>
@@ -4484,6 +4493,13 @@ function invalidateTransferPlan(){
   const st=document.getElementById('transfersStatus'); if(st) st.innerHTML='';
   const b=document.getElementById('btnExportTransfers');
   if(b){ b.disabled=true; b.style.opacity=.4; b.style.cursor='not-allowed'; }
+  // Hide + reset the view filter bar — it belongs to the plan that just died
+  const bar=document.getElementById('transfersFilterBar');
+  if(bar) bar.style.display='none';
+  ['transferFilterFrom','transferFilterTo','transferFilterBrand'].forEach(id=>{
+    const s=document.getElementById(id); if(s) s.value='';
+  });
+  S._transferSort=null;
 }
 function saveTransferMinDays(){
   const d=Math.max(1,parseInt(document.getElementById('transferMinDays')?.value||'120',10));
@@ -4759,43 +4775,117 @@ async function buildTransfers(){
     +' &middot; <strong>'+units+'</strong> unit'+(units===1?'':'s')+' to move'
     +' &middot; '+skuN+' exact-SKU, '+btN+' Brand+Type'
     +' &middot; scope: '+dead.length+' dead source line'+(dead.length===1?'':'s');
-  renderTransfersTable(suggestions);
+  populateTransferFilters(suggestions);
+  renderTransferView();
   setExportEnabled(suggestions.length>0);
 }
-function renderTransfersTable(rows){
+// ── Transfers view layer: From/To/Brand filters + column sorting ──────────
+// View-only — filtering/sorting never re-runs the engine or touches the plan.
+function populateTransferFilters(plan){
+  const bar=document.getElementById('transfersFilterBar');
+  if(bar) bar.style.display='flex';
+  const fromM=new Map(), toM=new Map(), brandM=new Map();
+  plan.forEach(r=>{ fromM.set(String(r.fromId),r.from); toM.set(String(r.toId),r.to); brandM.set(r.brand,r.brand); });
+  const fill=(id,map,allLabel)=>{
+    const el=document.getElementById(id); if(!el) return;
+    const prev=el.value;
+    const opts=[...map.entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+    el.innerHTML='<option value="">'+allLabel+'</option>'
+      +opts.map(([v,lbl])=>'<option value="'+hesc(v)+'">'+hesc(lbl)+'</option>').join('');
+    // Keep the user's selection if it still exists in the new plan
+    el.value=[...el.options].some(o=>o.value===prev)?prev:'';
+  };
+  fill('transferFilterFrom',fromM,'All origins');
+  fill('transferFilterTo',toM,'All destinations');
+  fill('transferFilterBrand',brandM,'All brands');
+}
+function getTransferView(){
+  const plan=S._transferPlan||[];
+  const f=document.getElementById('transferFilterFrom')?.value||'';
+  const t=document.getElementById('transferFilterTo')?.value||'';
+  const b=document.getElementById('transferFilterBrand')?.value||'';
+  let view=plan.filter(r=>
+    (!f||String(r.fromId)===f)&&
+    (!t||String(r.toId)===t)&&
+    (!b||r.brand===b)
+  );
+  const s=S._transferSort;
+  if(s&&s.key){
+    const numeric=(s.key==='qty'||s.key==='daysSit'||s.key==='destVel');
+    view=view.slice().sort((a,x)=>{
+      const av=s.key==='match'?a.matchType:a[s.key];
+      const bv=s.key==='match'?x.matchType:x[s.key];
+      const c=numeric?((av||0)-(bv||0)):String(av||'').localeCompare(String(bv||''));
+      return s.dir*c;
+    });
+  }
+  return view;
+}
+function sortTransfers(key){
+  const s=S._transferSort;
+  if(s&&s.key===key){ S._transferSort={key,dir:-s.dir}; }
+  else {
+    // Numeric columns open descending (biggest first) — that's the useful read
+    const numeric=(key==='qty'||key==='daysSit'||key==='destVel');
+    S._transferSort={key,dir:numeric?-1:1};
+  }
+  renderTransferView();
+}
+function clearTransferFilters(){
+  ['transferFilterFrom','transferFilterTo','transferFilterBrand'].forEach(id=>{
+    const s=document.getElementById(id); if(s) s.value='';
+  });
+  S._transferSort=null;
+  renderTransferView();
+}
+function renderTransferView(){
+  renderTransfersTable(getTransferView(),(S._transferPlan||[]).length);
+}
+function renderTransfersTable(rows,planTotal){
   const el=document.getElementById('transfersResult'); if(!el) return;
   if(!rows||!rows.length){
-    el.innerHTML='<div style="padding:20px;color:var(--muted);font-size:12px;text-align:center">No suggestions</div>';
+    const filtered=(planTotal||0)>0;
+    el.innerHTML='<div style="padding:20px;color:var(--muted);font-size:12px;text-align:center">'
+      +(filtered?'No suggestions match the current filters &mdash; clear them to see all '+planTotal.toLocaleString()+'.':'No suggestions')
+      +'</div>';
     return;
   }
   // Cap the DOM at 500 rows — a permissive run can produce thousands of
   // suggestions and one giant innerHTML would stall the tab. Export has them all.
   const MAX_ROWS=500;
   const shown=rows.length>MAX_ROWS ? rows.slice(0,MAX_ROWS) : rows;
-  // Totals row (sticky, above the column headers) — computed over the FULL plan,
-  // not just the rendered slice
+  // Totals row (sticky, above the column headers) — computed over the full
+  // FILTERED view (what Export writes), not just the rendered slice
   const totQty=rows.reduce((a,b)=>a+b.qty,0);
   const totSku=rows.filter(r=>r.matchType==='sku').length;
   const totSrc=new Set(rows.map(r=>r.fromId)).size;
   const totDst=new Set(rows.map(r=>r.toId)).size;
+  const filteredNote=(typeof planTotal==='number'&&planTotal>rows.length)
+    ? ' <span style="font-weight:400">&middot; filtered from '+planTotal.toLocaleString()+'</span>' : '';
+  // Sortable column headers — click toggles asc/desc, arrow marks the active one
+  const sort=S._transferSort;
+  const arrow=key=>(sort&&sort.key===key)?(sort.dir===1?' &#9650;':' &#9660;'):'';
+  const th=(key,label,align)=>'<th onclick="sortTransfers(\''+key+'\')" title="Sort by '+label.replace(/&\w+;\s*/g,'')+'" '
+    +'style="text-align:'+align+';padding:8px;border-bottom:1px solid var(--border2);cursor:pointer;user-select:none;white-space:nowrap">'
+    +label+arrow(key)+'</th>';
   const html=['<table style="width:100%;font-size:12px;border-collapse:collapse">',
     '<thead style="position:sticky;top:0;background:var(--surface-2);z-index:1">',
     '<tr style="background:var(--blue-bg);color:var(--blue)">',
     '<td colspan="5" style="padding:8px;font-weight:700">TOTAL &mdash; '+rows.length.toLocaleString()+' suggestion'+(rows.length===1?'':'s')
-      +' <span style="font-weight:400">('+totSrc+' source '+(totSrc===1?'store':'stores')+' &rarr; '+totDst+' destination '+(totDst===1?'store':'stores')+')</span></td>',
+      +' <span style="font-weight:400">('+totSrc+' source '+(totSrc===1?'store':'stores')+' &rarr; '+totDst+' destination '+(totDst===1?'store':'stores')+')</span>'+filteredNote+'</td>',
     '<td style="padding:8px;text-align:right;font-weight:700" title="Total units to move">'+totQty.toLocaleString()+'</td>',
     '<td colspan="3" style="padding:8px">'+totSku.toLocaleString()+' exact-SKU &middot; '+(rows.length-totSku).toLocaleString()+' Brand+Type</td>',
     '</tr>',
     '<tr>',
-    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">From</th>',
-    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">&rarr; To</th>',
-    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">SKU</th>',
-    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">Brand</th>',
-    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">Type</th>',
-    '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border2)">Qty</th>',
-    '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border2)">Days Sitting</th>',
-    '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border2)">Dest 90d Vel</th>',
-    '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">Confidence</th>',
+    th('from','From','left'),
+    th('to','&rarr; To','left'),
+    th('sku','SKU','left'),
+    th('brand','Brand','left'),
+    th('type','Type','left'),
+    th('qty','Qty','right'),
+    th('daysSit','Days Sitting','right'),
+    th('destVel','Dest 90d Vel','right'),
+    th('match','Confidence','left'),
     '</tr></thead><tbody>'];
   shown.forEach(r=>{
     const pillCls=r.matchType==='sku'?'p-ok':'p-info';
@@ -4818,8 +4908,10 @@ function renderTransfersTable(rows){
   el.innerHTML=html.join('');
 }
 function exportTransfers(){
-  const plan=S._transferPlan||[];
-  if(!plan.length){ alert('Run "Find transfers" first.'); return; }
+  if(!(S._transferPlan||[]).length){ alert('Run "Find transfers" first.'); return; }
+  // Export follows the on-screen view: active From/To/Brand filters + sort order
+  const plan=getTransferView();
+  if(!plan.length){ alert('Current filters hide all suggestions — clear them or pick different values.'); return; }
   const wb=XLSX.utils.book_new();
   const dt=new Date().toLocaleDateString();
   const header=['From Store','From Loc ID','To Store','To Loc ID','SKU','Brand','Type','Description','Qty','Days Sitting (source)','Dest 90d Vel','Confidence'];
