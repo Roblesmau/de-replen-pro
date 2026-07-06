@@ -64,7 +64,7 @@ Step 3  — Live Data (auto, always fresh):
             -> Orders 90d + Prior Year (parallel, sequential fallback)
             -> processLiveData() -> DATA[] -> apply PY velocity
             -> refreshWHAfterStep2B() -> auto-fires Step 4A or 4B based on S.whSource
-Step 4A — WH Bin Contents (Excel upload OR pull last upload from de_wh_bins)
+Step 4A — WH Bin Contents (Excel upload OR pull last upload from replen_wh_bins)
    OR
 Step 4B — Live availability from Supabase inventory_available (read-only)
 Step 5  — Inspect Data
@@ -273,7 +273,7 @@ kills the entire 5-8 min Shopify load. With it, the run survives transient upstr
 ## Pipeline Steps — Cache Load (Step 2A + 2B)
 
 **Step 2A: loadCatalogFromCache() (~30 sec)**
-1. Supabase `de_products` → itemMap (paginated 1000/page, **`order=inventory_item_id` required**)
+1. Supabase `replen_products` → itemMap (paginated 1000/page, **`order=inventory_item_id` required**)
 2. → auto-triggers loadLiveData(itemMap)
 
 > **CRITICAL:** Always include `&order=inventory_item_id` on Supabase paginated reads.
@@ -306,9 +306,9 @@ Never call `r.json()` directly — throws "Unexpected end of JSON input" on upse
 
 ### Tables
 ```sql
-de_products (inventory_item_id text PK, variant_sku text, brand text, type text,
+replen_products (inventory_item_id text PK, variant_sku text, brand text, type text,
              title text, price numeric, barcode text, synced_at timestamptz)
-de_sync_log (id serial PK, synced_at timestamptz, product_count int, variant_count int)
+replen_sync_log (id serial PK, synced_at timestamptz, product_count int, variant_count int)
 ```
 
 ---
@@ -363,7 +363,7 @@ Keyboard shortcut Ctrl+7 = Transfers. The Settings tab is hidden by default (`di
 1. Test connection
 2.  Load from cloud OR Full Shopify load (product catalog)
 3.  Auto: Locations + Inventory + Orders 90d + Prior Year (was 2B)
-4A. Upload WH Bin Contents (Excel) — pushed to `de_wh_bins`
+4A. Upload WH Bin Contents (Excel) — pushed to `replen_wh_bins`
 4B. Load live availability from Supabase `inventory_available` (read-only)
 5.  Inspect data
 
@@ -371,11 +371,11 @@ User picks 4A or 4B via the **WH source segmented toggle** above the steps row (
 
 ### WH Source Selection (4A vs 4B)
 
-**Step 4A — Excel upload (`de_wh_bins` cloud table)**
+**Step 4A — Excel upload (`replen_wh_bins` cloud table)**
 - User uploads NAV bin contents Excel file via `parseWH()`.
 - Filtered at upload time by Allowed Locations + Allowed Zones in **Upload Settings**.
-- Only filtered rows pushed to `de_wh_bins` via `pushWHToSupabase()`.
-- Schema: `de_wh_bins(id, bin_code, item_no, qty, location_code, zone_code, uploaded_at, uploaded_by)` + `de_wh_meta(id=1, last_uploaded_at, last_uploaded_by, row_count, sku_count)`.
+- Only filtered rows pushed to `replen_wh_bins` via `pushWHToSupabase()`.
+- Schema: `replen_wh_bins(id, bin_code, item_no, qty, location_code, zone_code, uploaded_at, uploaded_by)` + `replen_wh_meta(id=1, last_uploaded_at, last_uploaded_by, row_count, sku_count)`.
 - "Load from cloud" button under Step 4A re-pulls the last upload.
 - `S.whRaw` carries the per-bin granularity; `S.wh` is the SKU-aggregated view used by `buildRecos`.
 
@@ -391,7 +391,7 @@ User picks 4A or 4B via the **WH source segmented toggle** above the steps row (
 ```sql
 -- Step 4A:
 select location_code, count(distinct item_no) as skus, sum(qty) as qty
-  from de_wh_bins group by location_code order by location_code;
+  from replen_wh_bins group by location_code order by location_code;
 -- Step 4B:
 select location_code, count(*) as skus, sum(available_qty) as available, max(synced_at)
   from inventory_available group by location_code order by location_code;
@@ -436,11 +436,11 @@ Each column: `flex-direction:column`, label is `font-size:11px, uppercase, lette
 Inventory filter changes propagate to: Dashboard widgets (`updateDash`), Capacity tab (rendered on tab switch), Replenishment scope (`buildRecos` re-runs).
 
 ### Capacity — Cloud sync (Supabase, shared across users)
-- Two new Supabase tables: `de_capacity` (rows: store_id, brand, type, max_capacity, updated_at, updated_by) and `de_capacity_meta` (single-row table holding last_uploaded_at, last_uploaded_by, cell_count for the badge)
+- Two new Supabase tables: `replen_capacity` (rows: store_id, brand, type, max_capacity, updated_at, updated_by) and `replen_capacity_meta` (single-row table holding last_uploaded_at, last_uploaded_by, cell_count for the badge)
 - SQL DDL documented in commit message — run once in Supabase SQL Editor
 - Pull on boot: `pullCapacityFromSupabase()` fires after `processLiveData` populates S.CAP from localStorage; cloud rows are then overlaid (cloud = source of truth). Also fires on first Capacity tab activation
 - Push on save: `pushCapacityToSupabase()` called from `exportCapXLSXAndSave` (rebadged "Save & Sync") AND from `importCapFromFile` success. Upserts all non-zero cells in batches of 500 with `on_conflict=store_id,brand,type&resolution=merge-duplicates`, then bumps the meta row
-- Clear all: also calls `wipeCloudCapacity()` (deletes all rows in `de_capacity` and the meta row)
+- Clear all: also calls `wipeCloudCapacity()` (deletes all rows in `replen_capacity` and the meta row)
 - Toolbar buttons: `⬇ Save & Sync` (was `Export & Save`) · `☁ Pull` (manual re-fetch) · existing Reset / Clear all
 - Cloud status box at top of Capacity tab (`#capCloudBox`): shows `Last sync: 5m ago by mauricio · 1,245 cells in cloud`; updates after every push/pull. Helper: `setCloudStatus`, `fmtRelTime`, `getCurrentUserLabel` (best-effort: domain part of Shopify domain → 'anonymous' if missing)
 - Graceful degradation: if Supabase table doesn't exist (404), badge shows "Cloud table not found — run the SQL DDL"; localStorage continues working
@@ -535,7 +535,7 @@ Store-to-store dead-stock reallocation. Mirror-image of replenishment: instead o
 - `btnExportTransfers` — `📋 Export` writes xlsx + logs ledger (disabled until results exist)
 
 **Sitting-clock resolution (`buildLastInboundMap`):**
-1. `S._transfersLatest` — pulled from Supabase view `de_transfers_latest` (authoritative; direction-aware inbound date per `to_loc|sku`)
+1. `S._transfersLatest` — pulled from Supabase view `replen_transfers_latest` (authoritative; direction-aware inbound date per `to_loc|sku`)
 2. Fallback: `S.raw.inventory[].updated_at` joined via `itemMap[inventory_item_id].variantSku` — key `location_id|sku`
 Ledger always wins when both are present. `daysSitting = floor((now − ms) / 86_400_000)`.
 
@@ -552,9 +552,9 @@ Ledger always wins when both are present. `daysSitting = floor((now − ms) / 86
 - `buildTransfers` is **async**: it awaits `S._transfersPullPromise` if a ledger pull is in flight (never silently builds from the updated_at fallback while the ledger is seconds away).
 
 **Ledger — Supabase shared source of truth:**
-- Table `de_transfers(id, exported_at, from_loc, to_loc, variant_sku, qty, source, user_label)` — anon RLS (select/insert/update/delete); indexes on `(to_loc, variant_sku, exported_at desc)` and `(exported_at desc)`
-- View `de_transfers_latest` — `DISTINCT ON (to_loc, variant_sku) ... ORDER BY ... exported_at DESC` (one row per store+SKU), `security_invoker = true` (Supabase lint: SECURITY DEFINER views bypass RLS)
-- Paginated pull MUST use `order=to_loc,variant_sku` — the view's unique pair. `variant_sku` alone repeats across stores → unstable offset pagination silently skips rows (same bug class as the de_products `order=` rule)
+- Table `replen_transfers(id, exported_at, from_loc, to_loc, variant_sku, qty, source, user_label)` — anon RLS (select/insert/update/delete); indexes on `(to_loc, variant_sku, exported_at desc)` and `(exported_at desc)`
+- View `replen_transfers_latest` — `DISTINCT ON (to_loc, variant_sku) ... ORDER BY ... exported_at DESC` (one row per store+SKU), `security_invoker = true` (Supabase lint: SECURITY DEFINER views bypass RLS)
+- Paginated pull MUST use `order=to_loc,variant_sku` — the view's unique pair. `variant_sku` alone repeats across stores → unstable offset pagination silently skips rows (same bug class as the replen_products `order=` rule)
 - `logTransferExport(rows, source)` — non-blocking POST in 500-row batches. Self-guards (do not remove): **live-mode only** (`S.mode!=='live'` → return; sample plans carry synthetic SKUs with REAL store IDs), **session idempotency** via `S._ledgerLogged` Set keyed `source|to_loc|sku|qty` (re-exporting the same plan — full workbook or per-store — never appends duplicates / resets sitting-clocks; the Set is cleared when a NEW plan is built in `runRun`/`buildTransfers`), **no prompt** (reads `de_user_label` directly, defaults `'anonymous'` — never calls `getCurrentUserLabel()` which would pop a dialog mid-export). After writing it merges the payload into `S._transfersLatest` locally — no network re-pull.
 - **Called from** `exportNAV` (source=`'replenishment'`, from_loc=`'WAREHOUSE'`) AND `exportTransfers` (source=`'transfer'`, from_loc=source store's location_id)
 - Pulled after `processLiveData` (which sets `S._transfersCloudPulled=true` first so the tab-switch pull doesn't double-fetch) and lazily on first Transfers tab visit. The no-credentials early-return inside the pull resets `S._transfersCloudPulled=false` so a later visit retries (mirrors WH).
@@ -703,7 +703,7 @@ S = {
 - [ ] Tab DOM order: `tab-connect`, `tab-inventory`, `tab-dashboard`, `tab-capacity`, `tab-exceptions`, `tab-stores`, `tab-transfers` (Settings hidden)
 - [ ] `panel-exceptions` present with `excFile` upload + `excCount` + Download/Export/Clear buttons
 - [ ] `panel-transfers` present with `transferMinDays` + `transferMatchLevel` + `btnBuildTransfers` + `btnExportTransfers` + `transfersCloudStatus` + `transfersStatus` + `transfersResult` (no "Coming soon" placeholder)
-- [ ] `showTab('transfers')` hydrates the input via `loadTransferMinDays()` and lazily pulls `de_transfers_latest` once (guarded by `S._transfersCloudPulled`)
+- [ ] `showTab('transfers')` hydrates the input via `loadTransferMinDays()` and lazily pulls `replen_transfers_latest` once (guarded by `S._transfersCloudPulled`)
 - [ ] `exportNAV` fires `logTransferExport(...,'replenishment')` after `XLSX.writeFile` — feeds sitting-clock
 - [ ] `exportTransfers` fires `logTransferExport(...,'transfer')` after `XLSX.writeFile`
 - [ ] `processLiveData` calls `pullTransfersFromSupabase()` non-blocking after `pullExceptionsFromSupabase`, sets `S._transfersCloudPulled=true` first, and calls `invalidateTransferPlan()`
@@ -714,7 +714,7 @@ S = {
 - [ ] `buildTransfers` uses `getEffectiveCap` (not raw `S.CAP`) and pre-seeds `committed` from `S.activeRecos`
 - [ ] `--card` CSS token defined in BOTH `:root/[data-theme="light"]` and `[data-theme="dark"]` blocks
 - [ ] Boot line calls `loadTransferMinDays()` (guarded `typeof ==='function'`) at end of the buildSample+load hooks chain
-- [ ] `de_transfers` table + `de_transfers_latest` view + anon RLS (select/insert/update/delete) exist in Supabase
+- [ ] `replen_transfers` table + `replen_transfers_latest` view + anon RLS (select/insert/update/delete) exist in Supabase
 - [ ] `S.exceptions` is a `Set` (not array) initialized in S
 - [ ] `isExcepted(storeId, sku)` check at the TOP of the `DATA.forEach` in `buildRecos`
 - [ ] `velTierPanel` toggleable in Store Selection tab; `S.velTiers` defaulted from `VEL_TIERS_DEFAULT`
@@ -730,7 +730,7 @@ S = {
 - [ ] WH source segmented toggle present (`#whSrcBtnUpload`, `#whSrcBtnSupabase`) with `selectWHSource(target)` handlers
 - [ ] `S.whSource` persisted in `de_wh_source`; defaults to `'upload'`
 - [ ] `S.whRaw` carries per-bin granularity with `location_code` + `zone_code` populated; `S.wh` is SKU-aggregated
-- [ ] `de_wh_bins` schema includes `location_code` + `zone_code` columns (DDL ran)
+- [ ] `replen_wh_bins` schema includes `location_code` + `zone_code` columns (DDL ran)
 - [ ] `pushWHToSupabase` writes both columns; `pullWHFromSupabase` reads them
 - [ ] `processWHRows` RESETS every `DATA[].whQty=0` before applying new `S.wh` values (prevents stale residue when filter narrows)
 - [ ] `pullFromInventoryAvailable` includes `?available_qty=gt.0` + `&order=item_no` + server-side `location_code=in.(...)` filter
@@ -815,7 +815,7 @@ S = {
 | All brands selected → only 2 Ray-Ban units ship despite 233 units of room | Per-SKU `room = d.cap - d.storeQty` check let any one SKU "see" full bucket headroom; brand+type aggregate was never enforced | Pre-compute `aggOnHand[bucket]` from real DATA, track `aggUsed[bucket]` during the loop, `aggRoom = effectiveCap - baseOnHand - aggUsed`. Multiple SKUs in same bucket share one budget |
 | Gap-fill ships 0 new-to-store SKUs even when room exists | Synthetic gap-fill rows were appended at the END of DATA; under-target real rows iterated first and ate `aggUsed` budget | `DATA = injected.concat(realRows)` — synthetic rows process FIRST so new-to-store wins aggregate room |
 | Real DATA row with no WH-match inflates `aggUsed` with phantom recos | `whQty` fallback used the brand+type SUM when SKU not in `S.wh`, then `filterActive` dropped the phantom rec at WH pool stage — budget already wasted | Drop the brand+type fallback: real rows w/o exact SKU match get `whQty=0`, no reco pushed, no budget eaten |
-| Switching to Connect tab in 3B mode silently reloads stale 3A data | `showTab('connect')` fired `pullWHFromSupabase()` (reads `de_wh_bins` = 3A source) unconditionally; `_whCloudPulled` flag never set in the supabase boot branch | Gate by `S.whSource==='upload'` in `showTab('connect')`. The 4B path is handled separately by `refreshLiveConnectCloudLabels` |
+| Switching to Connect tab in 3B mode silently reloads stale 3A data | `showTab('connect')` fired `pullWHFromSupabase()` (reads `replen_wh_bins` = 3A source) unconditionally; `_whCloudPulled` flag never set in the supabase boot branch | Gate by `S.whSource==='upload'` in `showTab('connect')`. The 4B path is handled separately by `refreshLiveConnectCloudLabels` |
 | Inventory tab `% full` and "X recs" pill stale after Clear results | `clearReplenishmentResults` wiped `S.recos` but `S.storeStats[id].recos` was last written during `buildRecos` and kept its old count | `clearReplenishmentResults` zeroes `S.storeStats[id].recos` for every store before re-rendering. `pct` is left alone since it reflects inventory state, not run output |
 | Inventory tab filter row orphans columns awkwardly at ~1100px | Uncapped `flex-wrap` with `min-width:180px` allowed two-row reflows with the "Actions" column dangling | New `.inv-filter-row` uses `grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))`. Mobile breakpoint at 600px stacks vertically. |
 | Sticky headers don't pin on tall tables in Inventory / Capacity / Store Selection | Tables were inside `overflow-x:auto` wrappers — `position:sticky` only sticks within nearest scroll ancestor, which existed but had no `max-height` so it never engaged | New `.table-scroll` class: `overflow:auto; max-height:75vh; position:relative;`. `<thead> th` gets `position:sticky; top:0`. SKU detail's TOTAL row gets a second sticky row at `top:34px` |

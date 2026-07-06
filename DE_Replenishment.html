@@ -1004,7 +1004,7 @@
       <div id="step3aCol" style="display:flex;flex-direction:column;align-items:center;gap:4px">
         <span style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Step 4A &mdash; Upload</span>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:center">
-          <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch the last uploaded NAV file from Supabase (de_wh_bins) — available after Step 3" style="opacity:.4;pointer-events:none">&#9889; Load from cloud</button>
+          <button id="btnWHCloudPull" class="btn btn-green btn-sm" onclick="pullWHFromSupabase(true)" title="Re-fetch the last uploaded NAV file from Supabase (replen_wh_bins) — available after Step 3" style="opacity:.4;pointer-events:none">&#9889; Load from cloud</button>
           <span id="whCloudSync" style="font-size:10px;color:var(--muted);text-align:center;line-height:1.3">Checking the cloud&hellip;</span>
           <label id="btnWH" class="btn btn-primary btn-sm" style="cursor:pointer;opacity:.4;pointer-events:none">
             &#127981; Upload Bin Contents
@@ -1805,7 +1805,7 @@ function clearExcList(){
 }
 
 // ---- Exceptions Cloud Sync (Supabase) ----
-// Shared list across users, stored in `de_exceptions` and `de_exceptions_meta` tables.
+// Shared list across users, stored in `replen_exceptions` and `replen_exceptions_meta` tables.
 // Pull on boot + on tab activation. Push on every mutation (add/remove/import/clear).
 
 function setExcCloudStatus(text,color){
@@ -1822,7 +1822,7 @@ async function pullExceptionsFromSupabase(manual=false){
     setExcCloudStatus('☁ Pulling from cloud…');
     let all=[]; let from=0; const pageSize=1000;
     while(true){
-      const page=await sbFetch('/de_exceptions?select=*&order=store_id&limit='+pageSize+'&offset='+from);
+      const page=await sbFetch('/replen_exceptions?select=*&order=store_id&limit='+pageSize+'&offset='+from);
       if(!Array.isArray(page)||!page.length) break;
       all=all.concat(page);
       if(page.length<pageSize) break;
@@ -1839,7 +1839,7 @@ async function pullExceptionsFromSupabase(manual=false){
     updateExcCount();
     if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
     let meta=null;
-    try{ const m=await sbFetch('/de_exceptions_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    try{ const m=await sbFetch('/replen_exceptions_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
     if(meta){
       const who=meta.last_uploaded_by||'someone';
       setExcCloudStatus(`Last sync: <strong>${fmtRelTime(meta.last_uploaded_at)}</strong> by <strong>${who}</strong> · ${meta.exception_count||all.length} exceptions in cloud · pulled ${all.length} now`,'green');
@@ -1860,11 +1860,11 @@ async function pushExceptionsToSupabase(destructiveReplace=false){
     // For replace-style operations (file import, manual single-add doesn't need this),
     // wipe the cloud first so removed entries actually disappear.
     if(destructiveReplace){
-      await sbFetch('/de_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+      await sbFetch('/replen_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
     } else {
       // For incremental adds/removes: also clear so remove operations propagate.
       // Cheap: list is usually small (<500 rows). One DELETE round-trip.
-      await sbFetch('/de_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+      await sbFetch('/replen_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
     }
     const rows=[...(S.exceptions||[])].map(k=>{
       const[sid,sku]=k.split('|');
@@ -1874,7 +1874,7 @@ async function pushExceptionsToSupabase(destructiveReplace=false){
     if(rows.length){
       for(let i=0;i<rows.length;i+=500){
         const batch=rows.slice(i,i+500);
-        await sbFetch('/de_exceptions?on_conflict=store_id,sku',{
+        await sbFetch('/replen_exceptions?on_conflict=store_id,sku',{
           method:'POST',
           prefer:'resolution=merge-duplicates,return=minimal',
           body:batch
@@ -1884,7 +1884,7 @@ async function pushExceptionsToSupabase(destructiveReplace=false){
     }
     const who=getCurrentUserLabel();
     try{
-      await sbFetch('/de_exceptions_meta?on_conflict=id',{
+      await sbFetch('/replen_exceptions_meta?on_conflict=id',{
         method:'POST',
         prefer:'resolution=merge-duplicates,return=minimal',
         body:[{id:1,last_uploaded_at:new Date().toISOString(),last_uploaded_by:who,exception_count:pushed}]
@@ -1899,8 +1899,8 @@ async function pushExceptionsToSupabase(destructiveReplace=false){
 async function wipeCloudExceptions(){
   const {url,key}=getSBCreds();
   if(!url||!key) return;
-  await sbFetch('/de_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
-  await sbFetch('/de_exceptions_meta?id=eq.1',{method:'DELETE',prefer:'return=minimal'});
+  await sbFetch('/replen_exceptions?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+  await sbFetch('/replen_exceptions_meta?id=eq.1',{method:'DELETE',prefer:'return=minimal'});
   setExcCloudStatus('Cloud exception list cleared','amber');
 }
 
@@ -2291,7 +2291,7 @@ function showTab(t){
   if(t==='capacity'){ renderCap(); if(typeof pullCapacityFromSupabase==='function' && !S._capCloudPulled){ S._capCloudPulled=true; pullCapacityFromSupabase().catch(()=>{}); } }
   if(t==='exceptions'){ renderExcList(); if(typeof pullExceptionsFromSupabase==='function' && !S._excCloudPulled){ S._excCloudPulled=true; pullExceptionsFromSupabase().catch(()=>{}); } }
   if(t==='transfers'){ if(typeof loadTransferMinDays==='function') loadTransferMinDays(); if(typeof pullTransfersFromSupabase==='function' && !S._transfersCloudPulled){ S._transfersCloudPulled=true; pullTransfersFromSupabase().catch(()=>{}); } }
-  // Gate by source: pullWHFromSupabase reads de_wh_bins (the 3A source). Firing it while
+  // Gate by source: pullWHFromSupabase reads replen_wh_bins (the 3A source). Firing it while
   // the user is in 3B (Supabase live) mode would let processWHRows overwrite the active
   // inventory_available data with stale 3A bin counts on every Connect-tab visit.
   if(t==='connect'){ if(S.whSource==='upload' && typeof pullWHFromSupabase==='function' && !S._whCloudPulled){ S._whCloudPulled=true; pullWHFromSupabase().catch(()=>{}); } }
@@ -3829,7 +3829,7 @@ function exportCapXLSXAndSave(){
 }
 
 // ---- Capacity Cloud Sync (Supabase) ----
-// Shared, multi-user capacity matrix stored in Supabase tables `de_capacity` and `de_capacity_meta`.
+// Shared, multi-user capacity matrix stored in Supabase tables `replen_capacity` and `replen_capacity_meta`.
 // Pull on boot (after catalog loads) overlays cloud values on top of localStorage.
 // Push on Save & Sync / Import sends updates so other users see them.
 
@@ -4120,7 +4120,7 @@ async function setWHSource(target,opts){
     await pullFromInventoryAvailable(true);
     if(typeof refreshInvAvailOverview==='function') refreshInvAvailOverview(false).catch(()=>{});
   } else {
-    // Try to repopulate from de_wh_bins (the last uploaded file's cloud copy)
+    // Try to repopulate from replen_wh_bins (the last uploaded file's cloud copy)
     if(typeof pullWHFromSupabase==='function') pullWHFromSupabase(false).catch(()=>{});
     if(typeof refreshWHUploadOverview==='function') refreshWHUploadOverview(false).catch(()=>{});
   }
@@ -4138,7 +4138,7 @@ function refreshWHAfterStep2B(){
       refreshInvAvailOverview(false).catch(()=>{});
     }
   } else {
-    // 3A path: auto-pull the last uploaded file's cloud copy from de_wh_bins
+    // 3A path: auto-pull the last uploaded file's cloud copy from replen_wh_bins
     // (same handler that the "⚡ Load from cloud" button under Step 3A calls)
     if(typeof pullWHFromSupabase==='function'){
       pullWHFromSupabase(false).catch(()=>{});
@@ -4169,12 +4169,12 @@ function showWHOverviewPanel(){
   if(p) p.style.display='block';
 }
 
-// ===== Step 3A overview: per-location summary of de_wh_bins (Excel upload cloud copy) =====
+// ===== Step 3A overview: per-location summary of replen_wh_bins (Excel upload cloud copy) =====
 // Aggregates the entire cloud-stored upload by location_code so the user can see
 // what's in WH across every location they've pushed. Mirrors the SQL:
 //   select location_code, count(distinct item_no) as skus, sum(qty) as qty
-//   from de_wh_bins group by location_code order by location_code;
-// Plus de_wh_meta for the "last upload by whom" attribution.
+//   from replen_wh_bins group by location_code order by location_code;
+// Plus replen_wh_meta for the "last upload by whom" attribution.
 async function refreshWHUploadOverview(manual){
   // Guard: only render into the shared panel when 3A (upload) is the active source.
   // Otherwise we'd overwrite the 3B view that the user is currently looking at.
@@ -4185,9 +4185,9 @@ async function refreshWHUploadOverview(manual){
   const title=document.getElementById('whOverviewTitle');
   const qtyHdr=document.getElementById('whOverviewQtyHeader');
   const note=document.getElementById('whOverviewNote');
-  if(title) title.textContent='de_wh_bins — overview by location';
+  if(title) title.textContent='replen_wh_bins — overview by location';
   if(qtyHdr) qtyHdr.textContent='Qty';
-  if(note) note.innerHTML='This summary reflects every location pushed to <code>de_wh_bins</code>. Rows with empty Location end up under <code>(none)</code>.';
+  if(note) note.innerHTML='This summary reflects every location pushed to <code>replen_wh_bins</code>. Rows with empty Location end up under <code>(none)</code>.';
   const body=document.getElementById('whOverviewBody');
   const foot=document.getElementById('whOverviewFoot');
   const sync=document.getElementById('whOverviewSubtitle');
@@ -4195,7 +4195,7 @@ async function refreshWHUploadOverview(manual){
   try{
     let all=[]; let from=0; const pageSize=1000;
     while(true){
-      const path='/de_wh_bins?select=location_code,item_no,qty&order=location_code&limit='+pageSize+'&offset='+from;
+      const path='/replen_wh_bins?select=location_code,item_no,qty&order=location_code&limit='+pageSize+'&offset='+from;
       const page=await sbFetch(path);
       if(!Array.isArray(page)||!page.length) break;
       all=all.concat(page);
@@ -4234,7 +4234,7 @@ async function refreshWHUploadOverview(manual){
     }
     // Read meta for "Last upload by whom"
     let meta=null;
-    try{ const m=await sbFetch('/de_wh_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    try{ const m=await sbFetch('/replen_wh_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
     if(sync){
       if(meta && meta.last_uploaded_at){
         const ago=fmtRelTime(meta.last_uploaded_at);
@@ -4245,7 +4245,7 @@ async function refreshWHUploadOverview(manual){
         sync.textContent=rows.length?'Last upload: —':'No uploads yet';
       }
     }
-    if(manual) clog('☁ de_wh_bins overview: '+rows.length+' locations, '+all.length+' rows');
+    if(manual) clog('☁ replen_wh_bins overview: '+rows.length+' locations, '+all.length+' rows');
   }catch(e){
     if(sync) sync.textContent='Overview unavailable: '+e.message;
   }
@@ -4347,7 +4347,7 @@ async function pullWHFromSupabase(manual=false){
     setWHCloudStatus('&#9729; Pulling from cloud&hellip;');
     let all=[]; let from=0; const pageSize=1000;
     while(true){
-      const page=await sbFetch('/de_wh_bins?select=bin_code,item_no,qty,location_code,zone_code&order=item_no&limit='+pageSize+'&offset='+from);
+      const page=await sbFetch('/replen_wh_bins?select=bin_code,item_no,qty,location_code,zone_code&order=item_no&limit='+pageSize+'&offset='+from);
       if(!Array.isArray(page)||!page.length) break;
       all=all.concat(page);
       if(page.length<pageSize) break;
@@ -4370,7 +4370,7 @@ async function pullWHFromSupabase(manual=false){
     processWHRows(rows);
     // Read meta for attribution
     let meta=null;
-    try{ const m=await sbFetch('/de_wh_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    try{ const m=await sbFetch('/replen_wh_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
     if(meta){
       const who=meta.last_uploaded_by||'someone';
       const when=meta.last_uploaded_at;
@@ -4400,7 +4400,7 @@ async function pushWHToSupabase(){
   try{
     setWHCloudStatus('&#9729; Pushing to cloud&hellip;');
     // Wipe cloud table first (last-upload-wins semantics)
-    await sbFetch('/de_wh_bins?id=gt.0',{method:'DELETE',prefer:'return=minimal'});
+    await sbFetch('/replen_wh_bins?id=gt.0',{method:'DELETE',prefer:'return=minimal'});
     // Build rows — prefer S.whRaw (preserves bin granularity); fallback to S.wh (SKU-level)
     const who=getCurrentUserLabel();
     const now=new Date().toISOString();
@@ -4429,12 +4429,12 @@ async function pushWHToSupabase(){
     let pushed=0;
     for(let i=0;i<rows.length;i+=500){
       const batch=rows.slice(i,i+500);
-      await sbFetch('/de_wh_bins',{method:'POST',prefer:'return=minimal',body:batch});
+      await sbFetch('/replen_wh_bins',{method:'POST',prefer:'return=minimal',body:batch});
       pushed+=batch.length;
     }
     // Update meta
     try{
-      await sbFetch('/de_wh_meta?on_conflict=id',{
+      await sbFetch('/replen_wh_meta?on_conflict=id',{
         method:'POST',
         prefer:'resolution=merge-duplicates,return=minimal',
         body:[{id:1,last_uploaded_at:now,last_uploaded_by:who,row_count:rows.length,sku_count:S.wh.length}]
@@ -4454,9 +4454,9 @@ async function clearWHCloud(){
   const {url,key}=getSBCreds();
   if(!url||!key) return;
   try{
-    await sbFetch('/de_wh_bins?id=gt.0',{method:'DELETE',prefer:'return=minimal'});
+    await sbFetch('/replen_wh_bins?id=gt.0',{method:'DELETE',prefer:'return=minimal'});
     const now=new Date().toISOString();
-    await sbFetch('/de_wh_meta?on_conflict=id',{
+    await sbFetch('/replen_wh_meta?on_conflict=id',{
       method:'POST',
       prefer:'resolution=merge-duplicates,return=minimal',
       body:[{id:1,last_uploaded_at:now,last_uploaded_by:getCurrentUserLabel(),row_count:0,sku_count:0}]
@@ -4503,7 +4503,7 @@ function loadTransferMinDays(){
 }
 function buildLastInboundMap(){
   // Returns { "<location_id>|<sku-lowercase>": ms-since-epoch of last inbound }
-  // Ledger (de_transfers_latest) is the authoritative source; Shopify updated_at fills the rest.
+  // Ledger (replen_transfers_latest) is the authoritative source; Shopify updated_at fills the rest.
   const map={};
   if(Array.isArray(S._transfersLatest)){
     S._transfersLatest.forEach(r=>{
@@ -4542,7 +4542,7 @@ async function pullTransfersFromSupabase(manual=false){
     while(true){
       // order MUST be the view's unique pair (to_loc,variant_sku) — variant_sku alone
       // repeats across stores, and unstable offset pagination silently skips rows
-      const page=await sbFetch('/de_transfers_latest?select=to_loc,variant_sku,exported_at,from_loc,qty,source,user_label&order=to_loc,variant_sku&limit='+pageSize+'&offset='+from);
+      const page=await sbFetch('/replen_transfers_latest?select=to_loc,variant_sku,exported_at,from_loc,qty,source,user_label&order=to_loc,variant_sku&limit='+pageSize+'&offset='+from);
       if(!Array.isArray(page)||!page.length) break;
       all=all.concat(page);
       if(page.length<pageSize) break;
@@ -4603,7 +4603,7 @@ async function logTransferExport(rows,source){
     if(!payload.length) return;
     for(let i=0;i<payload.length;i+=500){
       const batch=payload.slice(i,i+500);
-      await sbFetch('/de_transfers',{method:'POST',prefer:'return=minimal',body:batch});
+      await sbFetch('/replen_transfers',{method:'POST',prefer:'return=minimal',body:batch});
     }
     clog('&#9729; Ledger: logged '+payload.length+' transfer line'+(payload.length===1?'':'s')+' ('+source+')');
     // Merge the just-written rows into the in-memory latest map — no network
@@ -4834,7 +4834,7 @@ async function pullCapacityFromSupabase(manual=false){
     // Paginated read (1000 rows/page) — required: include order= so offsets are stable (per CLAUDE.md)
     let all=[]; let from=0; const pageSize=1000;
     while(true){
-      const page=await sbFetch('/de_capacity?select=*&order=store_id&limit='+pageSize+'&offset='+from);
+      const page=await sbFetch('/replen_capacity?select=*&order=store_id&limit='+pageSize+'&offset='+from);
       if(!Array.isArray(page)||!page.length) break;
       all=all.concat(page);
       if(page.length<pageSize) break;
@@ -4866,7 +4866,7 @@ async function pullCapacityFromSupabase(manual=false){
     if(typeof renderCap==='function' && document.getElementById('panel-capacity')?.classList.contains('active')) renderCap();
     // Fetch meta (last_uploaded_at, last_uploaded_by, cell_count)
     let meta=null;
-    try{ const m=await sbFetch('/de_capacity_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
+    try{ const m=await sbFetch('/replen_capacity_meta?select=*&id=eq.1'); if(Array.isArray(m)&&m.length) meta=m[0]; }catch(_){}
     if(meta){
       const who=meta.last_uploaded_by||'someone';
       const when=meta.last_uploaded_at;
@@ -4905,12 +4905,12 @@ async function pushCapacityToSupabase(){
     }
     // Wipe cloud table first so zero-ed / removed cells disappear from the shared copy.
     // Without this, upsert leaves stale non-zero rows behind whenever a cell drops to 0.
-    await sbFetch('/de_capacity?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+    await sbFetch('/replen_capacity?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
     // Insert in batches of 500 to stay well under PostgREST limits
     let pushed=0;
     for(let i=0;i<rows.length;i+=500){
       const batch=rows.slice(i,i+500);
-      await sbFetch('/de_capacity',{
+      await sbFetch('/replen_capacity',{
         method:'POST',
         prefer:'return=minimal',
         body:batch
@@ -4921,7 +4921,7 @@ async function pushCapacityToSupabase(){
     const who=getCurrentUserLabel();
     const now=new Date().toISOString();
     try{
-      await sbFetch('/de_capacity_meta?on_conflict=id',{
+      await sbFetch('/replen_capacity_meta?on_conflict=id',{
         method:'POST',
         prefer:'resolution=merge-duplicates,return=minimal',
         body:[{id:1,last_uploaded_at:now,last_uploaded_by:who,cell_count:pushed}]
@@ -4942,8 +4942,8 @@ async function wipeCloudCapacity(){
   const {url,key}=getSBCreds();
   if(!url||!key) return;
   try{
-    await sbFetch('/de_capacity?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
-    await sbFetch('/de_capacity_meta?id=eq.1',{method:'DELETE',prefer:'return=minimal'});
+    await sbFetch('/replen_capacity?store_id=neq.__never__',{method:'DELETE',prefer:'return=minimal'});
+    await sbFetch('/replen_capacity_meta?id=eq.1',{method:'DELETE',prefer:'return=minimal'});
     setCloudStatus('Cloud capacity cleared','amber');
   }catch(e){ setCloudStatus('Cloud clear failed: '+e.message,'red'); }
 }
@@ -5101,7 +5101,7 @@ function populateNavLocMap(){
   }).join('');
 }
 // ── NAV export settings persistence ───────────────────────────────────────
-// localStorage is the fast local cache; Supabase de_nav_settings (single row id=1)
+// localStorage is the fast local cache; Supabase replen_nav_settings (single row id=1)
 // is the SHARED source of truth across all users — same pattern as capacity/exceptions.
 function setNavSettingsCloud(text,color){
   const el=document.getElementById('navSettingsCloud');
@@ -5145,7 +5145,7 @@ async function pushNavSettings(){
   let locMap={}; try{ locMap=JSON.parse(localStorage.getItem('de_nav_loc_map')||'{}'); }catch(_){}
   const who=(typeof getCurrentUserLabel==='function')?getCurrentUserLabel():'someone';
   const now=new Date().toISOString();
-  await sbFetch('/de_nav_settings?on_conflict=id',{
+  await sbFetch('/replen_nav_settings?on_conflict=id',{
     method:'POST',
     prefer:'resolution=merge-duplicates,return=minimal',
     body:[{id:1,wh_name:wh,action_message:act,loc_map:locMap,updated_at:now,updated_by:who}]
@@ -5157,7 +5157,7 @@ async function pullNavSettings(){
   const {url,key}=getSBCreds();
   if(!url||!key) return;
   try{
-    const rows=await sbFetch('/de_nav_settings?select=*&id=eq.1');
+    const rows=await sbFetch('/replen_nav_settings?select=*&id=eq.1');
     if(!Array.isArray(rows)||!rows.length) return;
     const r=rows[0];
     // Cloud is the source of truth — overwrite the local cache, then re-apply to the UI.
@@ -5338,7 +5338,7 @@ async function syncCatalogToSupabase(itemMap){
   let synced=0;
   for(let i=0;i<rows.length;i+=batchSize){
     const batch=rows.slice(i,i+batchSize);
-    await sbFetch('/de_products?on_conflict=inventory_item_id',{
+    await sbFetch('/replen_products?on_conflict=inventory_item_id',{
       method:'POST',
       prefer:'resolution=merge-duplicates,return=minimal',
       body:batch
@@ -5347,12 +5347,12 @@ async function syncCatalogToSupabase(itemMap){
     clog('  [SYNC] '+synced+'/'+rows.length+' items synced...');
   }
   // Log sync
-  await sbFetch('/de_sync_log',{
+  await sbFetch('/replen_sync_log',{
     method:'POST',
     body:{product_count:rows.filter(r=>r.variant_sku).length,variant_count:rows.length}
   });
   clog('  ✓ Supabase catalog sync complete — '+rows.length+' items');
-  // Refresh the "Cache last refreshed" label since we just updated de_sync_log
+  // Refresh the "Cache last refreshed" label since we just updated replen_sync_log
   if(typeof refreshCacheLastSync==='function') refreshCacheLastSync().catch(()=>{});
 }
 
@@ -5506,7 +5506,7 @@ async function loadCatalogFromCache(){
   ['btnCache','btnLoad'].forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;b.style.opacity='.4';b.style.cursor='not-allowed';}});
   try{
     setProgress(5);clog('[2A] Checking Supabase cache...');
-    const countRes=await sbFetch('/de_products?select=count');
+    const countRes=await sbFetch('/replen_products?select=count');
     const cacheCount=countRes?.[0]?.count||0;
     if(cacheCount===0){
       setConnStatus('Cache is empty \u2014 use Full Shopify load first','s-warn');
@@ -5519,7 +5519,7 @@ async function loadCatalogFromCache(){
     const itemMap={};let offset=0;const pageSize=1000;
     while(true){
       setProgress(Math.min(55,5+Math.round(offset/(cacheCount||1)*50)));
-      const rows=await sbFetch('/de_products?select=*&order=inventory_item_id&limit='+pageSize+'&offset='+offset);
+      const rows=await sbFetch('/replen_products?select=*&order=inventory_item_id&limit='+pageSize+'&offset='+offset);
       if(!rows||!rows.length) break;
       rows.forEach(r=>{itemMap[r.inventory_item_id]={variantSku:r.variant_sku,brand:r.brand,type:r.type,desc:r.title,cost:parseFloat(r.price)||0,barcode:r.barcode||'',model:r.model||'',color:r.product_color_code||'',size:r.size||'',upc:r.upc||'',erpBrand:r.erp_brand||'',erpType:r.erp_type||''};});
       offset+=rows.length;
@@ -5645,7 +5645,7 @@ async function testConn(){
   }
 }
 
-// Fetch + display the catalog cache freshness from Supabase de_sync_log
+// Fetch + display the catalog cache freshness from Supabase replen_sync_log
 function setCacheSyncLabel(html,color){
   const lbl=document.getElementById('cacheLastSync');
   if(!lbl) return;
@@ -5659,7 +5659,7 @@ async function refreshCacheLastSync(){
   const {url,key}=getSBCreds();
   if(!url||!key){ setCacheSyncLabel('Checking the cloud&hellip;'); return; }
   try{
-    const rows=await sbFetch('/de_sync_log?select=synced_at,variant_count,product_count&order=synced_at.desc&limit=1');
+    const rows=await sbFetch('/replen_sync_log?select=synced_at,variant_count,product_count&order=synced_at.desc&limit=1');
     if(!Array.isArray(rows)||!rows.length){
       setCacheSyncLabel('Cache: never synced','amber');
       return;
@@ -5670,7 +5670,7 @@ async function refreshCacheLastSync(){
     const items=(r.variant_count||0).toLocaleString();
     const stale=(Date.now()-new Date(when).getTime())/3600000>48;
     setCacheSyncLabel(`Last sync: <strong>${ago}</strong> &middot; ${items} items in cloud`,stale?'amber':'green');
-    lbl.title='Catalog cache freshness — pulled from Supabase de_sync_log. Last full Shopify sync on '+new Date(when).toLocaleString();
+    lbl.title='Catalog cache freshness — pulled from Supabase replen_sync_log. Last full Shopify sync on '+new Date(when).toLocaleString();
   }catch(e){
     setCacheSyncLabel('Cache status unavailable');
   }
@@ -6029,7 +6029,7 @@ function buildUnifiedRows(){
   // itemMap[inventory_item_id] = {variantSku, brand, type, desc, cost}
   const itemMap=S.raw.itemMap||{};
   // Model / Color / Size / UPC come from the ERP master (mau_main_items), joined
-  // server-side into de_products and carried on itemMap (v.model/color/size/upc) when
+  // server-side into replen_products and carried on itemMap (v.model/color/size/upc) when
   // the catalog was loaded from cache (Step 2A). Fallback for Model only: parse the
   // style code from the Shopify title (a 2B full-Shopify load has no ERP enrichment).
   const extractModel=(title)=>{
@@ -6379,7 +6379,7 @@ function renderInspector(){
     return;
   }
   if(table==='wh_unmatched'){
-    // WH SKUs (from Step 4A de_wh_bins OR Step 4B inventory_available) that did NOT
+    // WH SKUs (from Step 4A replen_wh_bins OR Step 4B inventory_available) that did NOT
     // pair to anything in S.raw.itemMap. These items will not be replenished because
     // the engine can't resolve their brand/type. Typically caused by:
     //   - SKU in WH but missing from Shopify catalog
@@ -6390,7 +6390,7 @@ function renderInspector(){
     const unmatched=wh.filter(r=>!r.matched);
     const unmatchedUnits=unmatched.reduce((a,b)=>a+(b.whQty||0),0);
     const totalUnits=wh.reduce((a,b)=>a+(b.whQty||0),0);
-    const srcLbl=S.whSource==='supabase'?'Step 4B (inventory_available)':'Step 4A (de_wh_bins)';
+    const srcLbl=S.whSource==='supabase'?'Step 4B (inventory_available)':'Step 4A (replen_wh_bins)';
     if(statsEl) statsEl.innerHTML='Source: <strong>'+srcLbl+'</strong> · <strong style="color:var(--red)">'+unmatched.length.toLocaleString()+'</strong> WH SKUs without Shopify match · <strong style="color:var(--red)">'+unmatchedUnits.toLocaleString()+'</strong> units stranded · '+(totalUnits>0?Math.round(unmatchedUnits/totalUnits*100):0)+'% of WH inventory · showing first '+Math.min(nRows,unmatched.length);
     if(!wh.length){
       document.getElementById('inspectorTableWrap').innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Load WH data first (Step 4A or 4B).</div>';
@@ -6808,7 +6808,7 @@ loadCredentials();
   const el=document.getElementById(id);if(el) el.addEventListener('change',saveCredentials);
 });
 // Populate cloud freshness labels AFTER loadCredentials has populated the input fields.
-// Step 2A reads Supabase de_sync_log (catalog cache); Step 3A pulls WH bins from de_wh_bins;
+// Step 2A reads Supabase replen_sync_log (catalog cache); Step 3A pulls WH bins from replen_wh_bins;
 // Step 3B pulls live availability from inventory_available (only if the user picked Supabase mode).
 function refreshLiveConnectCloudLabels(){
   if(typeof refreshCacheLastSync==='function'){
