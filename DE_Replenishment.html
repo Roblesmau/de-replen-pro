@@ -29,6 +29,7 @@
     --bg:       #F4F6FA;
     --surface:  #FFFFFF;
     --surface-2:#F8F9FB;
+    --card:     #FFFFFF;
     --glass:    rgba(255,255,255,0.72);
     --border:   rgba(15,23,42,0.06);
     --border2:  rgba(15,23,42,0.12);
@@ -55,6 +56,7 @@
     --bg:       #06080F;
     --surface:  #0B0F1A;
     --surface-2:#10141F;
+    --card:     #0B0F1A;
     --glass:    rgba(15,20,32,0.65);
     --border:   rgba(255,255,255,0.08);
     --border2:  rgba(255,255,255,0.14);
@@ -804,7 +806,7 @@
   </div>
 </div>
 
-<!-- TRANSFERS — placeholder, content TBD -->
+<!-- TRANSFERS — store-to-store dead-stock transfer suggestions -->
 <div class="panel" id="panel-transfers">
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -816,8 +818,10 @@
       A SKU is "dead" if it has stock on hand, zero sales in 90 days, and hasn't been touched at that store for at least
       <strong>N days</strong> (adjustable below). Matches are ranked: exact-SKU first (destination is already selling
       this specific frame), then Brand+Type (destination is selling the category well). Uses the shared transfer ledger
-      as the "last received" clock, with Shopify's <code>updated_at</code> as fallback. Respects Inventory-tab filters,
-      the Exceptions list, and destination capacity.
+      as the "last received" clock, with Shopify's <code>updated_at</code> as fallback. The Inventory tab's Store filter
+      scopes <strong>source</strong> stores only — destinations are always considered across all stores (Brand/Type
+      filters apply to both). Respects the Exceptions list and destination capacity, including the over-capacity
+      tolerance and any units already committed by the current replenishment plan.
     </div>
     <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="display:flex;flex-direction:column;gap:4px">
@@ -2015,6 +2019,7 @@ function runRun(){
   // so the Run is stateless — works even after Clear results wiped S.recos.
   if(typeof buildRecos==='function') buildRecos();
   filterActive();
+  S._ledgerLogged=new Set(); // fresh plan — its exports may log ledger rows again
   const r=S.activeRecos,sc=new Set(r.map(x=>x.storeId)).size;
   // Show run summary
   document.getElementById('runSummary').style.display='block';
@@ -2852,6 +2857,8 @@ function handleInvFilter(id,saveFn){
   updateDash();
   // Inventory filter changes affect replenishment scope (brands/types)
   if(typeof buildRecos==='function'&&DATA.length){buildRecos();renderStoreGrid();}
+  // ...and the Transfers plan (source scope) — a built plan is now stale
+  if(typeof invalidateTransferPlan==='function') invalidateTransferPlan();
 }
 function updateFilterCounts(){
   [['invStoreFilter','invStoreCount'],['invBrandFilter','invBrandCount'],['invTypeFilter','invTypeCount']].forEach(([fid,cid])=>{
@@ -3438,13 +3445,9 @@ function exportNAV(recsOverride){
     XLSX.utils.book_append_sheet(wb,ws,sheetName||sid);
   });
   XLSX.writeFile(wb,`NAV_TransferOrders_${new Date().toISOString().slice(0,10)}.xlsx`);
-  // Log to the shared transfer ledger — feeds the Transfers tab's sitting-clock
-  try{
-    if(typeof logTransferExport==='function'){
-      const ledgerRows=r.map(x=>({fromId:'WAREHOUSE', toId:x.storeId, sku:x.sku, qty:x.transferQty}));
-      logTransferExport(ledgerRows,'replenishment');
-    }
-  }catch(_){}
+  // Log to the shared transfer ledger — feeds the Transfers tab's sitting-clock.
+  // logTransferExport self-guards: live mode only, session-deduped, never throws.
+  logTransferExport(r.map(x=>({fromId:'WAREHOUSE', toId:x.storeId, sku:x.sku, qty:x.transferQty})),'replenishment');
 }
 function exportNAVSingle(sid){
   // Export a single store's recos without mutating S.activeRecos
@@ -4473,10 +4476,20 @@ function setTransfersCloudStatus(text,color){
   const map={green:'var(--green)',amber:'var(--amber)',red:'var(--red)',muted:'var(--muted)'};
   el.style.color=map[color]||'var(--muted)';
 }
+function invalidateTransferPlan(){
+  // Any change to the inputs/data a built plan depends on lands here — a stale
+  // plan must never remain exportable (it would write phantom rows to the ledger).
+  S._transferPlan=[];
+  const res=document.getElementById('transfersResult'); if(res) res.innerHTML='';
+  const st=document.getElementById('transfersStatus'); if(st) st.innerHTML='';
+  const b=document.getElementById('btnExportTransfers');
+  if(b){ b.disabled=true; b.style.opacity=.4; b.style.cursor='not-allowed'; }
+}
 function saveTransferMinDays(){
   const d=Math.max(1,parseInt(document.getElementById('transferMinDays')?.value||'120',10));
   const m=document.getElementById('transferMatchLevel')?.value||'both';
   try{ localStorage.setItem('de_transfer_min_days',String(d)); localStorage.setItem('de_transfer_match',m); }catch(_){}
+  invalidateTransferPlan();
 }
 function loadTransferMinDays(){
   let d=120, m='both';
@@ -4495,7 +4508,7 @@ function buildLastInboundMap(){
   if(Array.isArray(S._transfersLatest)){
     S._transfersLatest.forEach(r=>{
       if(!r.to_loc||!r.variant_sku||!r.exported_at) return;
-      const k=String(r.to_loc)+'|'+String(r.variant_sku).toLowerCase();
+      const k=String(r.to_loc)+'|'+normSku(r.variant_sku).toLowerCase();
       const ms=Date.parse(r.exported_at);
       if(!isNaN(ms)) map[k]=ms;
     });
@@ -4515,12 +4528,21 @@ function buildLastInboundMap(){
 }
 async function pullTransfersFromSupabase(manual=false){
   const {url,key}=getSBCreds();
-  if(!url||!key){ setTransfersCloudStatus('&#9729; Ledger shared across all users'); return; }
+  if(!url||!key){
+    setTransfersCloudStatus('&#9729; Ledger shared across all users');
+    // Creds not loaded yet — clear the one-shot guard so a later tab visit retries
+    // (mirrors pullWHFromSupabase's no-creds branch)
+    S._transfersCloudPulled=false;
+    return;
+  }
+  const run=(async()=>{
   try{
     setTransfersCloudStatus('&#9729; Pulling ledger&hellip;');
     let all=[]; let from=0; const pageSize=1000;
     while(true){
-      const page=await sbFetch('/de_transfers_latest?select=to_loc,variant_sku,exported_at,from_loc,qty,source,user_label&order=variant_sku&limit='+pageSize+'&offset='+from);
+      // order MUST be the view's unique pair (to_loc,variant_sku) — variant_sku alone
+      // repeats across stores, and unstable offset pagination silently skips rows
+      const page=await sbFetch('/de_transfers_latest?select=to_loc,variant_sku,exported_at,from_loc,qty,source,user_label&order=to_loc,variant_sku&limit='+pageSize+'&offset='+from);
       if(!Array.isArray(page)||!page.length) break;
       all=all.concat(page);
       if(page.length<pageSize) break;
@@ -4540,15 +4562,30 @@ async function pullTransfersFromSupabase(manual=false){
       setTransfersCloudStatus('&#9888; Ledger pull failed: '+e.message,'amber');
     }
   }
+  })();
+  // Expose the in-flight pull so buildTransfers can await it instead of silently
+  // building from the direction-blind updated_at fallback.
+  S._transfersPullPromise=run;
+  try{ await run; } finally { if(S._transfersPullPromise===run) S._transfersPullPromise=null; }
 }
 async function logTransferExport(rows,source){
   // Non-blocking; never throws. rows: [{fromId,toId,sku,qty}, ...]
   try{
+    // Sample-mode plans carry synthetic SKUs with REAL store IDs — they must
+    // never touch the shared production ledger.
+    if(S.mode!=='live') return;
     const {url,key}=getSBCreds();
     if(!url||!key) return;
     if(!Array.isArray(rows)||!rows.length) return;
-    const who=getCurrentUserLabel();
+    // Attribution WITHOUT getCurrentUserLabel's first-use prompt — an export
+    // must never pop a dialog mid-flow.
+    let who='anonymous';
+    try{ const l=(localStorage.getItem('de_user_label')||'').trim(); if(l) who=l; }catch(_){}
     const now=new Date().toISOString();
+    // Session idempotency: re-exporting the same plan (full workbook or per-store)
+    // must not append duplicate rows / reset sitting-clocks. The set is cleared
+    // when a NEW plan is built (runRun / buildTransfers).
+    if(!(S._ledgerLogged instanceof Set)) S._ledgerLogged=new Set();
     const payload=rows.filter(r=>r&&r.sku&&r.qty>0&&r.toId).map(r=>({
       exported_at:now,
       from_loc:String(r.fromId||'WAREHOUSE'),
@@ -4557,74 +4594,105 @@ async function logTransferExport(rows,source){
       qty:Math.round(r.qty),
       source:source||'replenishment',
       user_label:who
-    }));
+    })).filter(r=>{
+      const k=r.source+'|'+r.to_loc+'|'+r.variant_sku+'|'+r.qty;
+      if(S._ledgerLogged.has(k)) return false;
+      S._ledgerLogged.add(k);
+      return true;
+    });
     if(!payload.length) return;
     for(let i=0;i<payload.length;i+=500){
       const batch=payload.slice(i,i+500);
       await sbFetch('/de_transfers',{method:'POST',prefer:'return=minimal',body:batch});
     }
     clog('&#9729; Ledger: logged '+payload.length+' transfer line'+(payload.length===1?'':'s')+' ('+source+')');
-    // Refresh in-memory latest map so the next Transfers-tab run sees the new inbound dates
-    pullTransfersFromSupabase(false).catch(()=>{});
+    // Merge the just-written rows into the in-memory latest map — no network
+    // re-pull needed: these rows are by definition the newest per (to_loc, sku).
+    if(!Array.isArray(S._transfersLatest)) S._transfersLatest=[];
+    const idx={};
+    S._transfersLatest.forEach((r,i)=>{ idx[String(r.to_loc)+'|'+String(r.variant_sku)]=i; });
+    payload.forEach(r=>{
+      const k=r.to_loc+'|'+r.variant_sku;
+      if(idx[k]!==undefined) S._transfersLatest[idx[k]]=r;
+      else { idx[k]=S._transfersLatest.length; S._transfersLatest.push(r); }
+    });
   }catch(e){ clog('Ledger log warning: '+e.message); }
 }
-function buildTransfers(){
+const TRANSFER_CONF_LABEL={sku:'High (exact SKU)',brandtype:'Medium (Brand+Type)'};
+async function buildTransfers(){
   const statusEl=document.getElementById('transfersStatus');
   const resEl=document.getElementById('transfersResult');
   const expBtn=document.getElementById('btnExportTransfers');
-  const disable=()=>{ if(expBtn){ expBtn.disabled=true; expBtn.style.opacity=.4; expBtn.style.cursor='not-allowed'; } };
-  const enable =()=>{ if(expBtn){ expBtn.disabled=false; expBtn.style.opacity=1;  expBtn.style.cursor='pointer'; } };
+  const setExportEnabled=on=>{ if(expBtn){ expBtn.disabled=!on; expBtn.style.opacity=on?1:.4; expBtn.style.cursor=on?'pointer':'not-allowed'; } };
   if(!DATA.length){
     statusEl.innerHTML='<span style="color:var(--red)">No data loaded. Complete Step 3 first.</span>';
-    resEl.innerHTML=''; disable(); return;
+    resEl.innerHTML=''; setExportEnabled(false); return;
   }
-  const {days:minDays, match}=loadTransferMinDays();
-  const invStores=getFilterValues('invStoreFilter');
-  const invBrands=getFilterValues('invBrandFilter');
-  const invTypes =getFilterValues('invTypeFilter');
+  // If a ledger pull is in flight, wait for it — building from the direction-blind
+  // updated_at fallback while the authoritative ledger is seconds away yields a
+  // different (worse) plan on every click.
+  if(S._transfersPullPromise){
+    statusEl.innerHTML='<span style="color:var(--muted)">Waiting for the transfer ledger&hellip;</span>';
+    try{ await S._transfersPullPromise; }catch(_){}
+  }
+  // Settings read straight from the DOM — loadTransferMinDays is only the boot hydrator
+  const minDays=Math.max(1,parseInt(document.getElementById('transferMinDays')?.value||'120',10)||120);
+  const match=document.getElementById('transferMatchLevel')?.value||'both';
+  const storeSet=new Set(getFilterValues('invStoreFilter'));
+  const brandSet=new Set(getFilterValues('invBrandFilter'));
+  const typeSet =new Set(getFilterValues('invTypeFilter'));
   const lastInbound=buildLastInboundMap();
   const now=Date.now();
 
-  // Scope DATA to Inventory filters (same rule the rest of the app uses)
-  const scope=DATA.filter(d=>
-    (!invStores.length||invStores.includes(d.storeId))&&
-    (!invBrands.length||invBrands.includes(d.brand))&&
-    (!invTypes.length ||invTypes.includes(d.type))
+  // Brand/Type filters scope everything; the STORE filter scopes SOURCES only —
+  // destinations always consider all stores, otherwise a single-store filter
+  // would make matches structurally impossible.
+  const destScope=DATA.filter(d=>
+    (!brandSet.size||brandSet.has(d.brand))&&
+    (!typeSet.size ||typeSet.has(d.type))
   );
+  const srcScope=storeSet.size ? destScope.filter(d=>storeSet.has(d.storeId)) : destScope;
 
-  // Aggregate on-hand + capacity room per (store, brand, type); shared committed budget
+  // Units the current replenishment plan already committed per (store, brand, type):
+  // transfers must not re-allocate the same headroom.
+  const pendingRepl={};
+  (Array.isArray(S.activeRecos)?S.activeRecos:[]).forEach(r=>{
+    const bk=r.storeId+'|'+r.brand+'|'+r.type;
+    pendingRepl[bk]=(pendingRepl[bk]||0)+(r.transferQty||0);
+  });
+
+  // Aggregate effective capacity + on-hand per (store, brand, type). Same
+  // semantics as buildRecos: getEffectiveCap applies the over-capacity tolerance,
+  // and pending replenishment sends pre-consume the shared committed budget.
   const bAgg={};
-  scope.forEach(d=>{
+  destScope.forEach(d=>{
     const bk=d.storeId+'|'+d.brand+'|'+d.type;
-    if(!bAgg[bk]){
-      bAgg[bk]={ cap:(S.CAP[d.storeId]?.[d.brand]?.[d.type])||0, onHand:0, committed:0 };
-    }
+    if(!bAgg[bk]) bAgg[bk]={ cap:getEffectiveCap(d.storeId,d.brand,d.type), onHand:0, committed:(pendingRepl[bk]||0) };
     bAgg[bk].onHand+=(d.storeQty||0);
   });
 
-  // Fast lookup for exact-SKU destination rows
+  // Exact-SKU destination lookup + brand+type velocity per store — all stores
   const bySkuByStore={};
-  scope.forEach(d=>{
-    const k=String(d.sku||'').toLowerCase(); if(!k) return;
-    if(!bySkuByStore[k]) bySkuByStore[k]={};
-    if(!bySkuByStore[k][d.storeId]) bySkuByStore[k][d.storeId]=d;
-  });
-
-  // Aggregate brand+type velocity per destination store
   const btVel={};
-  scope.forEach(d=>{
+  destScope.forEach(d=>{
+    const k=normSku(d.sku).toLowerCase();
+    if(k){
+      if(!bySkuByStore[k]) bySkuByStore[k]={};
+      if(!bySkuByStore[k][d.storeId]) bySkuByStore[k][d.storeId]=d;
+    }
     const bk=d.storeId+'|'+d.brand+'|'+d.type;
     btVel[bk]=(btVel[bk]||0)+(d.velocity90||0);
   });
 
-  // Identify dead source rows
+  // Dead source rows: stock on hand, zero 90d sales, no movement for >= minDays.
+  // Keys use normSku to match both producers of the inbound map (ledger writes
+  // and the updated_at fallback) — raw d.sku may carry a leading apostrophe.
   const dead=[];
-  scope.forEach(d=>{
+  srcScope.forEach(d=>{
     if(!d.storeQty||d.storeQty<=0) return;
     if((d.velocity90||0)>0) return; // any 90d sale disqualifies as "dead here"
-    const skuKey=String(d.sku||'').toLowerCase(); if(!skuKey) return;
-    const inboundKey=String(d.storeId)+'|'+skuKey;
-    const lastMs=lastInbound[inboundKey];
+    const skuKey=normSku(d.sku).toLowerCase(); if(!skuKey) return;
+    const lastMs=lastInbound[String(d.storeId)+'|'+skuKey];
     if(!lastMs) return; // no clock evidence — skip conservatively
     const daysSit=Math.floor((now-lastMs)/86400000);
     if(daysSit<minDays) return;
@@ -4633,7 +4701,7 @@ function buildTransfers(){
 
   if(!dead.length){
     statusEl.innerHTML='<span style="color:var(--muted)">No sitting stock found under current settings (&ge; '+minDays+' days without movement, zero 90d sales, within active filters).</span>';
-    resEl.innerHTML=''; disable(); S._transferPlan=[]; return;
+    resEl.innerHTML=''; setExportEnabled(false); S._transferPlan=[]; return;
   }
 
   // Deadest + biggest surplus first
@@ -4645,57 +4713,34 @@ function buildTransfers(){
 
   dead.forEach(({d,daysSit,skuKey})=>{
     let remaining=d.storeQty;
-    if(remaining<=0) return;
-
-    // 1) Exact-SKU destinations: other stores selling THIS SKU with capacity room
+    // Shared allocator — ONE implementation of the room math for both match levels
+    const alloc=(toId,toName,destVel,matchType)=>{
+      if(remaining<=0) return;
+      const agg=bAgg[toId+'|'+d.brand+'|'+d.type];
+      if(!agg||agg.cap<=0) return;
+      const room=Math.max(0, agg.cap - agg.onHand - agg.committed);
+      if(room<=0) return;
+      const qty=Math.min(remaining, room);
+      agg.committed+=qty; remaining-=qty;
+      suggestions.push({
+        fromId:d.storeId, from:d.store, toId, to:toName,
+        sku:d.sku, brand:d.brand, type:d.type, desc:d.desc,
+        qty, daysSit, destVel, matchType
+      });
+    };
+    // 1) Exact-SKU destinations: other stores selling THIS SKU, best sellers first
     if(wantSku){
-      const dests=Object.values(bySkuByStore[skuKey]||{})
+      Object.values(bySkuByStore[skuKey]||{})
         .filter(x=>x.storeId!==d.storeId && !isExcepted(x.storeId,x.sku) && (x.velocity90||0)>0)
-        .sort((a,b)=>(b.velocity90||0)-(a.velocity90||0));
-      dests.forEach(x=>{
-        if(remaining<=0) return;
-        const bk=x.storeId+'|'+x.brand+'|'+x.type;
-        const agg=bAgg[bk]; if(!agg||agg.cap<=0) return;
-        const room=Math.max(0, agg.cap - agg.onHand - agg.committed);
-        if(room<=0) return;
-        const qty=Math.min(remaining, room);
-        if(qty<=0) return;
-        agg.committed+=qty; remaining-=qty;
-        suggestions.push({
-          fromId:d.storeId, from:d.store, toId:x.storeId, to:x.store,
-          sku:d.sku, brand:d.brand, type:d.type, desc:d.desc,
-          qty, daysSit, destVel:x.velocity90||0, srcVel:d.velocity90||0,
-          confidence:'High (exact SKU)', matchType:'sku'
-        });
-      });
+        .sort((a,b)=>(b.velocity90||0)-(a.velocity90||0))
+        .forEach(x=>alloc(x.storeId, x.store, x.velocity90||0, 'sku'));
     }
-
-    // 2) Brand+Type destinations: stores selling this brand+type well
+    // 2) Brand+Type destinations: stores selling this category well
     if(wantBT && remaining>0){
-      const cands=[];
-      STORES.forEach(st=>{
-        if(st.id===d.storeId) return;
-        const bk=st.id+'|'+d.brand+'|'+d.type;
-        const vel=btVel[bk]||0;
-        const agg=bAgg[bk]; if(!agg||!vel||agg.cap<=0) return;
-        if(isExcepted(st.id,d.sku)) return;
-        cands.push({storeId:st.id, store:st.short||st.name, vel, agg});
-      });
-      cands.sort((a,b)=>b.vel-a.vel);
-      cands.forEach(c=>{
-        if(remaining<=0) return;
-        const room=Math.max(0, c.agg.cap - c.agg.onHand - c.agg.committed);
-        if(room<=0) return;
-        const qty=Math.min(remaining, room);
-        if(qty<=0) return;
-        c.agg.committed+=qty; remaining-=qty;
-        suggestions.push({
-          fromId:d.storeId, from:d.store, toId:c.storeId, to:c.store,
-          sku:d.sku, brand:d.brand, type:d.type, desc:d.desc,
-          qty, daysSit, destVel:c.vel, srcVel:d.velocity90||0,
-          confidence:'Medium (Brand+Type)', matchType:'brandtype'
-        });
-      });
+      STORES
+        .filter(st=>st.id!==d.storeId && !isExcepted(st.id,d.sku) && (btVel[st.id+'|'+d.brand+'|'+d.type]||0)>0)
+        .sort((a,b)=>(btVel[b.id+'|'+d.brand+'|'+d.type]||0)-(btVel[a.id+'|'+d.brand+'|'+d.type]||0))
+        .forEach(st=>alloc(st.id, st.short||st.name, btVel[st.id+'|'+d.brand+'|'+d.type]||0, 'brandtype'));
     }
   });
 
@@ -4706,6 +4751,7 @@ function buildTransfers(){
   });
 
   S._transferPlan=suggestions;
+  S._ledgerLogged=new Set(); // new plan — its export may log fresh ledger rows
   const skuN=suggestions.filter(s=>s.matchType==='sku').length;
   const btN =suggestions.length-skuN;
   const units=suggestions.reduce((a,b)=>a+b.qty,0);
@@ -4714,7 +4760,7 @@ function buildTransfers(){
     +' &middot; '+skuN+' exact-SKU, '+btN+' Brand+Type'
     +' &middot; scope: '+dead.length+' dead source line'+(dead.length===1?'':'s');
   renderTransfersTable(suggestions);
-  if(suggestions.length) enable(); else disable();
+  setExportEnabled(suggestions.length>0);
 }
 function renderTransfersTable(rows){
   const el=document.getElementById('transfersResult'); if(!el) return;
@@ -4722,7 +4768,10 @@ function renderTransfersTable(rows){
     el.innerHTML='<div style="padding:20px;color:var(--muted);font-size:12px;text-align:center">No suggestions</div>';
     return;
   }
-  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // Cap the DOM at 500 rows — a permissive run can produce thousands of
+  // suggestions and one giant innerHTML would stall the tab. Export has them all.
+  const MAX_ROWS=500;
+  const shown=rows.length>MAX_ROWS ? rows.slice(0,MAX_ROWS) : rows;
   const html=['<table style="width:100%;font-size:12px;border-collapse:collapse">',
     '<thead style="position:sticky;top:0;background:var(--surface-2);z-index:1">',
     '<tr>',
@@ -4736,21 +4785,24 @@ function renderTransfersTable(rows){
     '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border2)">Dest 90d Vel</th>',
     '<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border2)">Confidence</th>',
     '</tr></thead><tbody>'];
-  rows.forEach(r=>{
+  shown.forEach(r=>{
     const pillCls=r.matchType==='sku'?'p-ok':'p-info';
     html.push('<tr style="border-top:1px solid var(--border)">'
-      +'<td style="padding:6px 8px">'+esc(r.from)+'</td>'
-      +'<td style="padding:6px 8px">'+esc(r.to)+'</td>'
-      +'<td style="padding:6px 8px;font-family:monospace;font-size:11px">'+esc(r.sku)+'</td>'
-      +'<td style="padding:6px 8px">'+esc(r.brand)+'</td>'
-      +'<td style="padding:6px 8px">'+esc(r.type)+'</td>'
+      +'<td style="padding:6px 8px">'+hesc(r.from)+'</td>'
+      +'<td style="padding:6px 8px">'+hesc(r.to)+'</td>'
+      +'<td style="padding:6px 8px;font-family:monospace;font-size:11px">'+hesc(r.sku)+'</td>'
+      +'<td style="padding:6px 8px">'+hesc(r.brand)+'</td>'
+      +'<td style="padding:6px 8px">'+hesc(r.type)+'</td>'
       +'<td style="padding:6px 8px;text-align:right;font-weight:600">'+r.qty+'</td>'
       +'<td style="padding:6px 8px;text-align:right">'+r.daysSit+'</td>'
       +'<td style="padding:6px 8px;text-align:right">'+Math.round(r.destVel)+'</td>'
-      +'<td style="padding:6px 8px"><span class="pill '+pillCls+'" style="font-size:10px">'+esc(r.confidence)+'</span></td>'
+      +'<td style="padding:6px 8px"><span class="pill '+pillCls+'" style="font-size:10px">'+hesc(TRANSFER_CONF_LABEL[r.matchType]||r.matchType)+'</span></td>'
       +'</tr>');
   });
   html.push('</tbody></table>');
+  if(rows.length>MAX_ROWS){
+    html.push('<div style="padding:10px;font-size:11px;color:var(--muted);text-align:center;border-top:1px solid var(--border)">Showing '+MAX_ROWS+' of '+rows.length.toLocaleString()+' suggestions &mdash; Export includes the full list.</div>');
+  }
   el.innerHTML=html.join('');
 }
 function exportTransfers(){
@@ -4761,25 +4813,17 @@ function exportTransfers(){
   const header=['From Store','From Loc ID','To Store','To Loc ID','SKU','Brand','Type','Description','Qty','Days Sitting (source)','Dest 90d Vel','Confidence'];
   const rows=[[`DESIGNER EYES — STORE-TO-STORE TRANSFERS · ${dt}`],[],header];
   plan.forEach(p=>{
-    rows.push([p.from,p.fromId,p.to,p.toId,p.sku,p.brand,p.type,p.desc||'',p.qty,p.daysSit,Math.round(p.destVel||0),p.confidence]);
+    // SKU pushed as a string so aoa_to_sheet emits a text cell (no scientific notation)
+    rows.push([p.from,p.fromId,p.to,p.toId,String(p.sku),p.brand,p.type,p.desc||'',p.qty,p.daysSit,Math.round(p.destVel||0),TRANSFER_CONF_LABEL[p.matchType]||p.matchType]);
   });
   rows.push([]);
   rows.push(['GRAND TOTAL','','','','','','','',plan.reduce((a,b)=>a+b.qty,0)]);
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:22},{wch:14},{wch:22},{wch:14},{wch:14},{wch:16},{wch:10},{wch:46},{wch:6},{wch:12},{wch:10},{wch:22}];
-  // Force SKU column (index 4) as text so Excel doesn't scientific-notation numeric SKUs
-  const firstBodyRow=3; // header is row 2 (0-based 2), body starts row 3
-  for(let i=firstBodyRow;i<firstBodyRow+plan.length;i++){
-    const addr=XLSX.utils.encode_cell({r:i,c:4});
-    if(ws[addr]){ ws[addr].t='s'; ws[addr].v=String(ws[addr].v); }
-  }
   XLSX.utils.book_append_sheet(wb,ws,'Transfers');
   XLSX.writeFile(wb,`DE_StoreTransfers_${new Date().toISOString().slice(0,10)}.xlsx`);
-  // Log the ledger — from source store this time, not the warehouse
-  try{
-    const ledgerRows=plan.map(p=>({fromId:p.fromId, toId:p.toId, sku:p.sku, qty:p.qty}));
-    logTransferExport(ledgerRows,'transfer');
-  }catch(_){}
+  // Ledger: from source store this time, not the warehouse (self-guarded, deduped)
+  logTransferExport(plan.map(p=>({fromId:p.fromId, toId:p.toId, sku:p.sku, qty:p.qty})),'transfer');
 }
 
 async function pullCapacityFromSupabase(manual=false){
@@ -5917,10 +5961,15 @@ function processLiveData(locs,invLevels,orders){
   loadExcFromLocalStorage();
   // Then pull cloud exceptions (shared source of truth) — non-blocking
   pullExceptionsFromSupabase().catch(e=>clog('Exception cloud pull warning: '+e.message));
-  // Transfer ledger — sitting-clock source of truth for the Transfers tab
+  // Transfer ledger — sitting-clock source of truth for the Transfers tab.
+  // Mark pulled so the first tab visit doesn't fire a redundant second fetch
+  // (the pull resets the flag itself when credentials are missing).
   if(typeof pullTransfersFromSupabase==='function'){
+    S._transfersCloudPulled=true;
     pullTransfersFromSupabase().catch(e=>clog('Transfer ledger pull warning: '+e.message));
   }
+  // DATA was rebuilt — any transfer plan computed against the old DATA is stale
+  if(typeof invalidateTransferPlan==='function') invalidateTransferPlan();
   // WH bin contents — itemMap is now built, so matching works
   // If we already pulled at boot, re-run processWHRows against existing S.whRaw to rebuild matches
   // Otherwise, fetch from Supabase

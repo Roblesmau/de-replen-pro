@@ -540,28 +540,37 @@ Store-to-store dead-stock reallocation. Mirror-image of replenishment: instead o
 Ledger always wins when both are present. `daysSitting = floor((now − ms) / 86_400_000)`.
 
 **Dead-source rule** (in `buildTransfers`):
-`storeQty > 0` AND `velocity90 === 0` AND row is within Inventory scope AND `daysSitting ≥ transferMinDays`. No clock evidence (no ledger row and no `updated_at`) → skip conservatively.
+`storeQty > 0` AND `velocity90 === 0` AND row is within source scope AND `daysSitting ≥ transferMinDays`. No clock evidence (no ledger row and no `updated_at`) → skip conservatively. All SKU join keys use `normSku(...).toLowerCase()` on BOTH producer and consumer sides — raw `d.sku` may carry a leading apostrophe (Supabase cache path stores `variant_sku` un-normalized).
+
+**Filter scoping (hardened Jul 2026):** Brand/Type filters scope BOTH sources and destinations; the Store filter scopes **sources only** — destinations always consider all stores. (Otherwise a single-store filter makes matches structurally impossible.)
 
 **Destination logic:**
 - Exact-SKU: other stores with a DATA row for the same SKU, `velocity90 > 0`, not excepted, sorted by dest velocity desc
 - Brand+Type: stores whose aggregate `sum(velocity90) for (brand,type)` > 0, not excepted for the source SKU, sorted by aggregate vel desc
-- Both share a per-(store,brand,type) `committed` counter → destinations never receive more units than `cap - onHand - committed`. Multiple dead sources compete for the same room in a single run.
+- ONE shared `alloc()` closure implements the room math for both levels: `room = getEffectiveCap(sid,b,t) − onHand − committed`, where `committed` is pre-seeded with the current replenishment plan's `S.activeRecos` transferQty per bucket — transfers never re-allocate headroom replenishment already claimed, and the over-capacity tolerance applies identically to both engines.
+- Suggestions store `matchType` (`'sku'`/`'brandtype'`) only; display labels derive from `TRANSFER_CONF_LABEL` at render/export time.
+- `buildTransfers` is **async**: it awaits `S._transfersPullPromise` if a ledger pull is in flight (never silently builds from the updated_at fallback while the ledger is seconds away).
 
 **Ledger — Supabase shared source of truth:**
 - Table `de_transfers(id, exported_at, from_loc, to_loc, variant_sku, qty, source, user_label)` — anon RLS (select/insert/update/delete); indexes on `(to_loc, variant_sku, exported_at desc)` and `(exported_at desc)`
-- View `de_transfers_latest` — `DISTINCT ON (to_loc, variant_sku) ... ORDER BY ... exported_at DESC` (one row per store+SKU)
-- `logTransferExport(rows, source)` — non-blocking POST in 500-row batches, appends to `de_transfers`, then re-pulls the view so the sitting-clock immediately reflects the write
+- View `de_transfers_latest` — `DISTINCT ON (to_loc, variant_sku) ... ORDER BY ... exported_at DESC` (one row per store+SKU), `security_invoker = true` (Supabase lint: SECURITY DEFINER views bypass RLS)
+- Paginated pull MUST use `order=to_loc,variant_sku` — the view's unique pair. `variant_sku` alone repeats across stores → unstable offset pagination silently skips rows (same bug class as the de_products `order=` rule)
+- `logTransferExport(rows, source)` — non-blocking POST in 500-row batches. Self-guards (do not remove): **live-mode only** (`S.mode!=='live'` → return; sample plans carry synthetic SKUs with REAL store IDs), **session idempotency** via `S._ledgerLogged` Set keyed `source|to_loc|sku|qty` (re-exporting the same plan — full workbook or per-store — never appends duplicates / resets sitting-clocks; the Set is cleared when a NEW plan is built in `runRun`/`buildTransfers`), **no prompt** (reads `de_user_label` directly, defaults `'anonymous'` — never calls `getCurrentUserLabel()` which would pop a dialog mid-export). After writing it merges the payload into `S._transfersLatest` locally — no network re-pull.
 - **Called from** `exportNAV` (source=`'replenishment'`, from_loc=`'WAREHOUSE'`) AND `exportTransfers` (source=`'transfer'`, from_loc=source store's location_id)
-- Pulled on boot (via tab switch to Transfers, guarded by `S._transfersCloudPulled`) and after `processLiveData` (non-blocking)
+- Pulled after `processLiveData` (which sets `S._transfersCloudPulled=true` first so the tab-switch pull doesn't double-fetch) and lazily on first Transfers tab visit. The no-credentials early-return inside the pull resets `S._transfersCloudPulled=false` so a later visit retries (mirrors WH).
 
-**Persistence:** `de_transfer_min_days`, `de_transfer_match` (localStorage). In-memory only: `S._transfersLatest`, `S._transferPlan`, `S._transfersCloudPulled`.
+**Plan invalidation (`invalidateTransferPlan`):** clears `S._transferPlan`, wipes `transfersResult`/`transfersStatus`, disables `btnExportTransfers`. Called from `processLiveData` (DATA rebuilt), `handleInvFilter` (scope changed), and `saveTransferMinDays` (settings changed). A stale plan must never remain exportable — it would write phantom rows to the shared ledger.
 
-**Excel export (`exportTransfers`):** one sheet "Transfers" with columns `From Store · From Loc ID · To Store · To Loc ID · SKU · Brand · Type · Description · Qty · Days Sitting (source) · Dest 90d Vel · Confidence`. SKU column forced to text (`t='s'`) so Excel doesn't scientific-notation numeric SKUs.
+**Persistence:** `de_transfer_min_days`, `de_transfer_match` (localStorage). In-memory only: `S._transfersLatest`, `S._transferPlan`, `S._transfersCloudPulled`, `S._transfersPullPromise`, `S._ledgerLogged`.
+
+**Rendering:** `renderTransfersTable` caps the DOM at 500 rows (footer shows "Showing 500 of N — Export includes the full list"); uses the global `hesc()` escaper, not a local copy.
+
+**Excel export (`exportTransfers`):** one sheet "Transfers" with columns `From Store · From Loc ID · To Store · To Loc ID · SKU · Brand · Type · Description · Qty · Days Sitting (source) · Dest 90d Vel · Confidence`. SKU pushed as `String(p.sku)` so `aoa_to_sheet` emits a text cell (no scientific notation, no post-hoc cell loop).
 
 **Design notes:**
 - The ledger date is "sent" (when the NAV file was exported), not "confirmed received" — leads true receipt by transit lag. Acceptable and clearly labeled.
 - `S.raw.inventory[].updated_at` is direction-blind (any adjustment resets it — including a sale). The ledger overrides it precisely for that reason.
-- Sample mode won't produce meaningful Transfers output (no `updated_at`, no ledger) — expected.
+- Sample mode is hard-blocked from the ledger (`logTransferExport` returns early) and won't produce meaningful Transfers output — expected.
 
 ### Inventory Tab Table
 Brand x Type grouped: `Brand | Type | On Hand | 90d Sales | Capacity | Fill% | [per-store cols]`
@@ -669,7 +678,7 @@ S = {
 
 ## Before Every File Delivery — Checklist
 - [ ] No duplicate function definitions
-- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `renderPriorityList`, `renderScopeBadges`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `wipeAllCapacities`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadCapTemplate`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`, `getQtyForRow`, `saveStoreSelection`, `loadStoreSelection`, `saveVelTiers`, `loadVelTiers`, `toggleVelTierPanel`, `renderVelTiers`, `parseExcFile`, `loadExcFromLocalStorage`, `saveExcToLocalStorage`, `isExcepted`, `downloadExcTemplate`, `exportExcList`, `clearExcList`, `buildImpactRows`, `renderImpactReport`, `sortImpactReport`, `exportImpactReport`, `toggleTheme`, `buildTransfers`, `renderTransfersTable`, `exportTransfers`, `buildLastInboundMap`, `pullTransfersFromSupabase`, `logTransferExport`, `loadTransferMinDays`, `saveTransferMinDays`, `setTransfersCloudStatus`
+- [ ] Key functions present: `loadCatalogFromCache`, `loadCatalogFromShopify`, `loadLiveData`, `loadFromCache` (alias), `loadAllData` (alias), `loadPriorYearOrders` (stub), `syncCatalogToSupabase`, `sbFetch`, `processLiveData`, `shopifyFetch`, `setProgress`, `buildRecos`, `renderStoreGrid`, `renderPriorityList`, `renderScopeBadges`, `exportNAV`, `exportRawTable`, `buildUnifiedRows`, `renderInspector`, `renderSchema`, `processWHRows`, `renderInv`, `renderCap`, `importCapFromFile`, `wipeAllCapacities`, `saveCapToLocalStorage`, `loadCapFromLocalStorage`, `downloadCapTemplate`, `downloadInspectorXLSX`, `simulate`, `getFD`, `getActiveBrands`, `getQtyForRow`, `saveStoreSelection`, `loadStoreSelection`, `saveVelTiers`, `loadVelTiers`, `toggleVelTierPanel`, `renderVelTiers`, `parseExcFile`, `loadExcFromLocalStorage`, `saveExcToLocalStorage`, `isExcepted`, `downloadExcTemplate`, `exportExcList`, `clearExcList`, `buildImpactRows`, `renderImpactReport`, `sortImpactReport`, `exportImpactReport`, `toggleTheme`, `buildTransfers`, `renderTransfersTable`, `exportTransfers`, `buildLastInboundMap`, `pullTransfersFromSupabase`, `logTransferExport`, `loadTransferMinDays`, `saveTransferMinDays`, `setTransfersCloudStatus`, `invalidateTransferPlan`
 - [ ] File size ~400 KB (July 2026 baseline, post-Transfers tab) — sudden drop still indicates truncation
 - [ ] `<div class="app">` count = 1
 - [ ] No `since_id` in orders URLs
@@ -695,9 +704,15 @@ S = {
 - [ ] `panel-exceptions` present with `excFile` upload + `excCount` + Download/Export/Clear buttons
 - [ ] `panel-transfers` present with `transferMinDays` + `transferMatchLevel` + `btnBuildTransfers` + `btnExportTransfers` + `transfersCloudStatus` + `transfersStatus` + `transfersResult` (no "Coming soon" placeholder)
 - [ ] `showTab('transfers')` hydrates the input via `loadTransferMinDays()` and lazily pulls `de_transfers_latest` once (guarded by `S._transfersCloudPulled`)
-- [ ] `exportNAV` fires `logTransferExport(ledgerRows,'replenishment')` after `XLSX.writeFile` — feeds sitting-clock
-- [ ] `exportTransfers` fires `logTransferExport(ledgerRows,'transfer')` after `XLSX.writeFile`
-- [ ] `processLiveData` calls `pullTransfersFromSupabase()` non-blocking after `pullExceptionsFromSupabase`
+- [ ] `exportNAV` fires `logTransferExport(...,'replenishment')` after `XLSX.writeFile` — feeds sitting-clock
+- [ ] `exportTransfers` fires `logTransferExport(...,'transfer')` after `XLSX.writeFile`
+- [ ] `processLiveData` calls `pullTransfersFromSupabase()` non-blocking after `pullExceptionsFromSupabase`, sets `S._transfersCloudPulled=true` first, and calls `invalidateTransferPlan()`
+- [ ] `logTransferExport` self-guards intact: `S.mode!=='live'` early-return · `S._ledgerLogged` dedup Set · no `getCurrentUserLabel()` call (reads `de_user_label` directly)
+- [ ] Ledger pull uses `order=to_loc,variant_sku` (unique pair — NEVER `variant_sku` alone) and resets `S._transfersCloudPulled=false` in its no-credentials branch
+- [ ] `S._ledgerLogged=new Set()` reset present in BOTH `runRun()` and `buildTransfers()` (new plan → may log again)
+- [ ] `invalidateTransferPlan` called from `handleInvFilter` and `saveTransferMinDays`
+- [ ] `buildTransfers` uses `getEffectiveCap` (not raw `S.CAP`) and pre-seeds `committed` from `S.activeRecos`
+- [ ] `--card` CSS token defined in BOTH `:root/[data-theme="light"]` and `[data-theme="dark"]` blocks
 - [ ] Boot line calls `loadTransferMinDays()` (guarded `typeof ==='function'`) at end of the buildSample+load hooks chain
 - [ ] `de_transfers` table + `de_transfers_latest` view + anon RLS (select/insert/update/delete) exist in Supabase
 - [ ] `S.exceptions` is a `Set` (not array) initialized in S
