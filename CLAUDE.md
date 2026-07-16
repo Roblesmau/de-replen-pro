@@ -534,13 +534,11 @@ Store-to-store dead-stock reallocation. Mirror-image of replenishment: instead o
 - `btnBuildTransfers` — `▶ Find transfers` runs `buildTransfers()`
 - `btnExportTransfers` — `📋 Export` writes xlsx + logs ledger (disabled until results exist)
 
-**Sitting-clock resolution (`buildLastInboundMap`):**
-1. `S._transfersLatest` — pulled from Supabase view `replen_transfers_latest` (authoritative; direction-aware inbound date per `to_loc|sku`)
-2. Fallback: `S.raw.inventory[].updated_at` joined via `itemMap[inventory_item_id].variantSku` — key `location_id|sku`
-Ledger always wins when both are present. `daysSitting = floor((now − ms) / 86_400_000)`.
+**Sitting-clock resolution (`buildLastInboundMap`) — Aug 2026: ledger dropped from this calc:**
+Always sourced from `S.raw.inventory[].updated_at` (joined via `itemMap[inventory_item_id].variantSku`, key `location_id|sku`), gated to rows where `available > 0`. The ledger (`replen_transfers_latest`) is no longer read here — `updated_at` is the store's own last-recorded change and is the more direct signal, even though it resets on ANY change (sale, adjustment, receive), not just a receive. Acceptable because the dead-source rule below already requires zero 90d sales, so a stale `updated_at` on an in-stock, zero-velocity SKU is a sound proxy for "hasn't moved." `daysSitting = floor((now − ms) / 86_400_000)`.
 
 **Dead-source rule** (in `buildTransfers`):
-`storeQty > 0` AND `velocity90 === 0` AND row is within source scope AND `daysSitting ≥ transferMinDays`. No clock evidence (no ledger row and no `updated_at`) → skip conservatively. All SKU join keys use `normSku(...).toLowerCase()` on BOTH producer and consumer sides — raw `d.sku` may carry a leading apostrophe (Supabase cache path stores `variant_sku` un-normalized).
+`storeQty > 0` AND `velocity90 === 0` AND row is within source scope AND `daysSitting ≥ transferMinDays`. No clock evidence (no `updated_at`, or `available <= 0` at map-build time) → skip conservatively. All SKU join keys use `normSku(...).toLowerCase()` on BOTH producer and consumer sides — raw `d.sku` may carry a leading apostrophe (Supabase cache path stores `variant_sku` un-normalized).
 
 **Filter scoping (hardened Jul 2026):** Brand/Type filters scope BOTH sources and destinations; the Store filter scopes **sources only** — destinations always consider all stores. (Otherwise a single-store filter makes matches structurally impossible.)
 
@@ -549,9 +547,9 @@ Ledger always wins when both are present. `daysSitting = floor((now − ms) / 86
 - Brand+Type: stores whose aggregate `sum(velocity90) for (brand,type)` > 0, not excepted for the source SKU, sorted by aggregate vel desc
 - ONE shared `alloc()` closure implements the room math for both levels: `room = getEffectiveCap(sid,b,t) − onHand − committed`, where `committed` is pre-seeded with the current replenishment plan's `S.activeRecos` transferQty per bucket — transfers never re-allocate headroom replenishment already claimed, and the over-capacity tolerance applies identically to both engines.
 - Suggestions store `matchType` (`'sku'`/`'brandtype'`) only; display labels derive from `TRANSFER_CONF_LABEL` at render/export time.
-- `buildTransfers` is **async**: it awaits `S._transfersPullPromise` if a ledger pull is in flight (never silently builds from the updated_at fallback while the ledger is seconds away).
+- `buildTransfers` remains `async` for future use but no longer waits on any ledger pull — the sitting-clock doesn't read the ledger, so there's nothing to wait for (removed Aug 2026; was a real wait with no effect on the result).
 
-**Ledger — Supabase shared source of truth:**
+**Ledger — Supabase shared source of truth (audit trail; NOT read by the sitting-clock):**
 - Table `replen_transfers(id, exported_at, from_loc, to_loc, variant_sku, qty, source, user_label)` — anon RLS (select/insert/update/delete); indexes on `(to_loc, variant_sku, exported_at desc)` and `(exported_at desc)`
 - View `replen_transfers_latest` — `DISTINCT ON (to_loc, variant_sku) ... ORDER BY ... exported_at DESC` (one row per store+SKU), `security_invoker = true` (Supabase lint: SECURITY DEFINER views bypass RLS)
 - Paginated pull MUST use `order=to_loc,variant_sku` — the view's unique pair. `variant_sku` alone repeats across stores → unstable offset pagination silently skips rows (same bug class as the replen_products `order=` rule)
@@ -574,8 +572,7 @@ Ledger always wins when both are present. `daysSitting = floor((now − ms) / 86
 **Excel export (`exportTransfers`):** one sheet "Transfers" with columns `From Store · From Loc ID · To Store · To Loc ID · SKU · Brand · Type · Description · Qty · Days Sitting (source) · Dest 90d Vel · Confidence`. SKU pushed as `String(p.sku)` so `aoa_to_sheet` emits a text cell (no scientific notation, no post-hoc cell loop). Exports the filtered/sorted view, not the raw plan.
 
 **Design notes:**
-- The ledger date is "sent" (when the NAV file was exported), not "confirmed received" — leads true receipt by transit lag. Acceptable and clearly labeled.
-- `S.raw.inventory[].updated_at` is direction-blind (any adjustment resets it — including a sale). The ledger overrides it precisely for that reason.
+- The ledger date is "sent" (when the NAV file was exported), not "confirmed received" — leads true physical receipt by transit/processing lag. This is exactly why (Aug 2026) it was dropped from the sitting-clock: `updated_at` is the store's own POS record of the change, a more direct signal despite being direction-blind (any adjustment resets it — including a sale, not just a receive). The ledger keeps accumulating for attribution/audit ("who exported what, when") but no longer feeds `daysSitting`.
 - Sample mode is hard-blocked from the ledger (`logTransferExport` returns early) and won't produce meaningful Transfers output — expected.
 
 ### Inventory Tab Table
@@ -710,7 +707,8 @@ S = {
 - [ ] `panel-exceptions` present with `excFile` upload + `excCount` + Download/Export/Clear buttons
 - [ ] `panel-transfers` present with `transferMinDays` + `transferMatchLevel` + `btnBuildTransfers` + `btnExportTransfers` + `transfersCloudStatus` + `transfersStatus` + `transfersResult` (no "Coming soon" placeholder)
 - [ ] `showTab('transfers')` hydrates the input via `loadTransferMinDays()` and lazily pulls `replen_transfers_latest` once (guarded by `S._transfersCloudPulled`)
-- [ ] `exportNAV` fires `logTransferExport(...,'replenishment')` after `XLSX.writeFile` — feeds sitting-clock
+- [ ] `exportNAV` fires `logTransferExport(...,'replenishment')` after `XLSX.writeFile` — audit trail only (sitting-clock reads `updated_at`, not the ledger)
+- [ ] `buildLastInboundMap` reads ONLY `S.raw.inventory[].updated_at` (gated `available > 0`) — does NOT read `S._transfersLatest` / the ledger
 - [ ] `exportTransfers` fires `logTransferExport(...,'transfer')` after `XLSX.writeFile`
 - [ ] `processLiveData` calls `pullTransfersFromSupabase()` non-blocking after `pullExceptionsFromSupabase`, sets `S._transfersCloudPulled=true` first, and calls `invalidateTransferPlan()`
 - [ ] `logTransferExport` self-guards intact: `S.mode!=='live'` early-return · `S._ledgerLogged` dedup Set · no `getCurrentUserLabel()` call (reads `de_user_label` directly)
