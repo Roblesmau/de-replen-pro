@@ -830,6 +830,66 @@ S = {
 
 ---
 
+## Best Practices
+
+### Working file location (worktrees)
+- When working inside `.claude/worktrees/<branch>/`, `DE_Replenishment.html` exists in BOTH the worktree and the main repo path. Confirm which copy you read before editing — Edit must target the same path that was Read.
+- Commit + push from the path where edits actually landed. Use `git -C "<path>" status` to verify before assuming a clean tree means "nothing changed."
+
+### Editing the single HTML file
+- Always Read before Edit. Files this large reject Edits if `old_string` isn't unique — quote 4-8 lines of surrounding context, not 1-2.
+- Prefer surgical Edits over Write rewrites. A full rewrite risks truncation and erases unrelated in-flight changes.
+- After any structural edit, mentally run the "Before Every File Delivery" checklist — it catches regressions (orphaned function calls, missing dropdown options, duplicate decls).
+- File size in the 200-230 KB range is healthy. Sudden drop = truncation; sudden spike = duplicate code blocks.
+
+### State refreshes after data mutations
+When mutating `S.wh`, `S.CAP`, `S.exceptions`, `DATA[]`, or filter selections, every dependent view must be refreshed in the SAME call:
+- `buildRecos()` — replenishment plan
+- `renderStoreGrid()` + `renderPriorityList()` + `renderScopeBadges()` — Store Selection tab
+- `renderInv()` — Inventory table
+- `renderDash()` — Dashboard widgets
+- `renderCap()` — Capacity matrix (if open)
+- `renderInspector()` — only if `#rawInspector` is visible
+- `renderImpactReport()` — only if `#impactReport` is visible
+- `updateFilterCounts()` — count pills on filter labels
+Guard render calls with `typeof X === 'function'` so boot-time partial loads don't throw.
+
+### In-memory vs persisted state
+- Persisted (localStorage): capacity, exceptions, store selection + priority, velocity tiers, allow-overcap, inventory filter selections, credentials, user label (`de_user_label`).
+- Persisted (Supabase, shared across users): capacity (`de_capacity` + `de_capacity_meta`), exceptions (`de_exceptions` + `de_exceptions_meta`), WH bin contents (`de_wh_bins` + `de_wh_meta`).
+- In-memory ONLY (lost on reload): `S.raw.*`, `DATA[]`, `S.recos`. `S.wh` and `S.whRaw` are NOT in localStorage — they are auto-pulled from Supabase on boot and after catalog load (last-upload-wins, shared across users).
+- When adding any new user-editable setting, decide persistence at design time and add the localStorage/Supabase key to the checklist.
+
+### CSS theming
+- Never hardcode hex colors in component styles — use `var(--text)`, `var(--surface)`, `var(--blue)`, `var(--blue-bg)`, `var(--border2)`, `var(--muted)`, `var(--red)` etc. so both `[data-theme="light"]` and `[data-theme="dark"]` work.
+- Native `<select multiple>` highlight color is OS-default and clashes with themes. Override with `option:checked { background:var(--blue); color:#fff }` and add a dark-mode rule for contrast.
+- Test every UI change in BOTH light and dark mode before deploying.
+
+### Replenishment invariants (do not regress)
+- Gap-fill block at the TOP of `buildRecos()` injects synthetic DATA rows for zero-stock SKUs. Runs regardless of priority mode.
+- Duplicate prevention is structural: per-store per-SKU send qty = `max(0, tierQty − storeQty)`. High-velocity SKUs get larger tier qtys via `VEL_TIERS_DEFAULT`, never additive duplicate sends.
+- Priority mode (urgency/velocity/manual) ONLY changes WH pool allocation order inside `filterActive` — it does not change per-store qty math.
+- `isExcepted(storeId, sku)` must be the FIRST check inside `DATA.forEach` in `buildRecos` so excepted pairs never consume warehouse units.
+
+### Shopify proxy boundaries (recap)
+- `/products.json` paginated = empty array. Always use variants-first + `products.json?ids=...` batches.
+- `/inventory_levels.json` batch size = `floor(250 / storeCount)`. Hardcoding 100 silently truncates.
+- `/orders.json` paginates with `created_at_max` cursor, never `since_id`.
+- Supabase paginated reads MUST include `&order=inventory_item_id` — without it, offset pagination skips rows.
+
+### Deployment flow
+- Edit -> commit (via `git -C "<repo>"`) -> `git push origin master` -> Vercel auto-deploys from GitHub.
+- For manual deploy: `vercel --prod --yes --archive=tgz` from repo root.
+- Hard refresh in the browser (Ctrl+Shift+R) after every deploy — Vercel + browser cache the HTML aggressively.
+
+### Communicating changes to Mau Rock
+- Lead with what changed and where (file + function/line), then why.
+- Show before/after only when behavior is non-obvious.
+- No emoji in code or comments (UI emoji is fine since the app already uses them).
+- When asked a yes/no verification question, answer it directly first, then explain — don't bury the answer.
+
+---
+
 ## File Management
 - Working file: `DE_Replenishment.html` in this project directory
 - Use the Edit tool for targeted replacements; Read the file before editing
